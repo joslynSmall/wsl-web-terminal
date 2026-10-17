@@ -24,7 +24,7 @@
 
 html, body {
   width: 100%;
-  height: 100%;
+  height: 100dvh;
   overflow: hidden;
   background-color: var(--bg-dark);
   color: var(--text-main);
@@ -36,7 +36,7 @@ html, body {
   display: flex;
   flex-direction: column;
   width: 100vw;
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -233,11 +233,11 @@ html, body {
 
 .terminal-wrapper {
   flex: 1;
+  min-height: 0;
   position: relative;
   background-color: var(--bg-dark);
   overflow: hidden;
   width: 100%;
-  height: 100%;
 }
 
 .terminal-container {
@@ -245,16 +245,18 @@ html, body {
   height: 100%;
   padding: 0;
   margin: 0;
+  touch-action: none;
 }
 
 .terminal-container .xterm {
   width: 100%;
   height: 100%;
   padding: 0;
+  touch-action: none;
 }
 
 .terminal-container .xterm-viewport {
-  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .status-bar {
@@ -486,3 +488,363 @@ html, body {
   background: rgba(137, 180, 250, 0.15);
   color: var(--primary);
 }
+
+/* ==========================================================================
+   移动端与触控自适应样式 (Responsive & Mobile Enhancements)
+   ========================================================================== */
+
+/* 移动端菜单与辅助按键默认状态（桌面端默认隐藏） */
+.mobile-only-btn {
+  display: none;
+}
+
+.accessory-bar {
+  display: none;
+  flex-shrink: 0;
+  height: 38px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 50;
+  align-items: center;
+  padding: 0 6px;
+  user-select: none;
+  transition: opacity 0.2s ease;
+}
+
+/* 手机端、平板 Pad 端 (≤ 1024px) 或任何触控设备默认直接展示虚拟按键栏 */
+@media (max-width: 1024px), (hover: none) and (pointer: coarse) {
+  .accessory-bar {
+    display: flex;
+  }
+}
+
+/* 用户手动强制显示 / 隐藏 */
+.app-layout.show-accessory .accessory-bar {
+  display: flex !important;
+}
+
+.app-layout.hide-accessory .accessory-bar {
+  display: none !important;
+}
+
+.accessory-scroller {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+  flex: 1;
+  padding: 4px 6px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.accessory-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.acc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-width: 34px;
+  padding: 0 8px;
+  background-color: var(--bg-tab);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 0.1s, transform 0.05s, border-color 0.1s, box-shadow 0.1s;
+}
+
+.acc-btn-keyboard {
+  background-color: rgba(137, 180, 250, 0.18);
+  border-color: rgba(137, 180, 250, 0.4);
+  font-size: 13px;
+  padding: 0 7px;
+}
+
+.acc-btn-enter {
+  background-color: var(--primary);
+  color: #11111b;
+  font-weight: 700;
+  border-color: var(--primary-hover);
+}
+
+.acc-btn-enter:hover {
+  background-color: var(--primary-hover);
+}
+
+.acc-btn:active, .acc-btn.active {
+  background-color: var(--primary);
+  color: #11111b;
+  border-color: var(--primary-hover);
+  transform: scale(0.96);
+}
+
+.acc-btn.sticky-active {
+  background-color: var(--primary);
+  color: #11111b;
+  border-color: var(--primary-hover);
+  box-shadow: 0 0 8px rgba(137, 180, 250, 0.5);
+}
+
+.acc-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  touch-action: manipulation;
+  transition: all 0.15s ease;
+}
+
+.acc-toggle-btn:hover {
+  background-color: var(--bg-tab);
+  color: var(--text-main);
+  border-color: var(--primary);
+}
+
+.accessory-bar.collapsed {
+  height: 20px;
+  min-height: 20px;
+  background: rgba(24, 24, 37, 0.85);
+  padding: 0;
+  justify-content: center;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+
+.accessory-bar.collapsed .accessory-scroller {
+  display: none;
+}
+
+.accessory-bar.collapsed .acc-toggle-btn {
+  width: 100%;
+  height: 20px;
+  font-size: 11px;
+  border: none;
+  background: transparent;
+  gap: 4px;
+}
+
+/* 侧滑/折叠抽屉菜单 */
+.mobile-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 280px;
+  max-width: 85vw;
+  height: 100dvh;
+  background-color: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(0);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.6);
+}
+
+.mobile-drawer.hidden {
+  transform: translateX(100%);
+  pointer-events: none;
+}
+
+.drawer-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 1000;
+  transition: opacity 0.2s ease;
+}
+
+.drawer-backdrop.hidden {
+  display: none;
+}
+
+.mobile-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--bg-card);
+}
+
+.mobile-drawer-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--primary);
+}
+
+.mobile-drawer-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.drawer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drawer-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.drawer-btn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.drawer-btn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drawer-btn-list .btn, .drawer-btn-grid .btn {
+  justify-content: center;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+/* ==========================================================================
+   响应式断点 (Mobile & Pad Breakpoints)
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  /* 顶栏收纳 */
+  .top-nav {
+    padding: 0 8px;
+    height: 42px;
+    min-height: 42px;
+  }
+
+  .brand-title {
+    font-size: 12px;
+  }
+
+  /* 隐藏桌面专属按钮，展示汉堡菜单 */
+  #btn-fullscreen,
+  #btn-font-dec,
+  #btn-font-inc,
+  #btn-refresh,
+  #btn-external-shells {
+    display: none !important;
+  }
+
+  .mobile-only-btn {
+    display: inline-flex;
+    padding: 6px 10px;
+    font-size: 15px;
+  }
+
+  /* 优化 Tab 触控面积 */
+  .tabs-bar {
+    height: 38px;
+    min-height: 38px;
+    padding: 0 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-item {
+    height: 33px;
+    padding: 4px 14px;
+    font-size: 12px;
+    touch-action: manipulation;
+  }
+
+  .tab-close {
+    width: 20px;
+    height: 20px;
+    font-size: 14px;
+  }
+
+  /* 状态栏紧凑排版与 iPhone 底部安全区适配 */
+  .status-bar {
+    height: calc(22px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    font-size: 10px;
+    padding-left: 8px;
+    padding-right: 8px;
+    overflow: hidden;
+  }
+
+  .status-left, .status-right {
+    gap: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-left span, .status-right span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 模态框移动端适配 */
+  .modal-card {
+    width: 95vw;
+    max-height: 90vh;
+  }
+
+  .shell-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .shell-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 480px) {
+  /* 超窄屏手机下隐藏冗长的工作目录与次要命令字段，保障核心窗口目标与终端视口尺寸清晰可见 */
+  .status-right {
+    display: none;
+  }
+
+  #status-command,
+  .status-left .sep:nth-of-type(1) {
+    display: none;
+  }
+
+  .brand-icon {
+    font-size: 14px;
+  }
+
+  #connection-badge {
+    padding: 2px 5px;
+    font-size: 10px;
+  }
+}
+

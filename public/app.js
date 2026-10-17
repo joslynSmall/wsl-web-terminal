@@ -32,6 +32,26 @@ const btnCopyJoin = document.getElementById('btn-copy-join');
 const joinCmdText = document.getElementById('join-cmd-text');
 const externalShellsListEl = document.getElementById('external-shells-list');
 
+const accBarEl = document.getElementById('terminal-accessory-bar');
+const btnCtrl = document.getElementById('acc-btn-ctrl');
+const btnAlt = document.getElementById('acc-btn-alt');
+const btnToggleAccessory = document.getElementById('btn-toggle-accessory');
+const btnToggleKeys = document.getElementById('btn-toggle-keys');
+const btnDrawerToggleKeys = document.getElementById('btn-drawer-toggle-keys');
+let isCtrlActive = false;
+let isAltActive = false;
+
+const btnMobileMenu = document.getElementById('btn-mobile-menu');
+const mobileMenuDrawerEl = document.getElementById('mobile-menu-drawer');
+const btnCloseDrawer = document.getElementById('btn-close-drawer');
+const mobileMenuBackdropEl = document.getElementById('mobile-menu-backdrop');
+const btnDrawerFontDec = document.getElementById('btn-drawer-font-dec');
+const btnDrawerFontInc = document.getElementById('btn-drawer-font-inc');
+const btnDrawerFullscreen = document.getElementById('btn-drawer-fullscreen');
+const btnDrawerRefresh = document.getElementById('btn-drawer-refresh');
+const btnDrawerExternalShells = document.getElementById('btn-drawer-external-shells');
+const drawerExternalCountEl = document.getElementById('drawer-external-count');
+
 function initTerminal() {
   term = new window.Terminal({
     cursorBlink: true,
@@ -74,18 +94,160 @@ function initTerminal() {
   });
 
   term.onData((data) => {
+    let payload = data;
+    if (isCtrlActive) {
+      isCtrlActive = false;
+      if (btnCtrl && btnCtrl.classList) btnCtrl.classList.remove('sticky-active');
+      if (typeof payload === 'string' && payload.length === 1) {
+        const charCode = payload.toLowerCase().charCodeAt(0);
+        if (charCode >= 97 && charCode <= 122) {
+          payload = String.fromCharCode(charCode - 96);
+        } else if (payload === '[') {
+          payload = '\x1b';
+        } else if (payload === '\\') {
+          payload = '\x1c';
+        } else if (payload === ']') {
+          payload = '\x1d';
+        }
+      }
+    } else if (isAltActive) {
+      isAltActive = false;
+      if (btnAlt && btnAlt.classList) btnAlt.classList.remove('sticky-active');
+      payload = '\x1b' + payload;
+    }
+
     if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
-      currentSocket.send(data);
+      currentSocket.send(payload);
     }
   });
 
+  // 移动端全功能触控滑动手势引擎：将手机屏幕的上下滑动手势转换为终端滚动与 SGR 鼠标滚轮信号
+  let touchStartY = 0;
+  let touchStartX = 0;
+  let touchLastY = 0;
+  let isSwiping = false;
+  let scrollAccumulator = 0;
+
+  if (terminalContainerEl && terminalContainerEl.addEventListener) {
+    terminalContainerEl.addEventListener('touchstart', (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      touchStartY = e.touches[0].clientY;
+      touchStartX = e.touches[0].clientX;
+      touchLastY = touchStartY;
+      isSwiping = false;
+      scrollAccumulator = 0;
+    }, { passive: true });
+
+    terminalContainerEl.addEventListener('touchmove', (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      const currentY = e.touches[0].clientY;
+      const currentX = e.touches[0].clientX;
+      const diffY = currentY - touchLastY;
+      const totalDistY = Math.abs(currentY - touchStartY);
+      const totalDistX = Math.abs(currentX - touchStartX);
+
+      if (totalDistY > 6 && totalDistY > totalDistX) {
+        isSwiping = true;
+        touchLastY = currentY;
+        scrollAccumulator += diffY;
+
+        const step = 16;
+        if (Math.abs(scrollAccumulator) >= step) {
+          const lines = Math.trunc(scrollAccumulator / step);
+          scrollAccumulator %= step;
+
+          const rect = terminalContainerEl.getBoundingClientRect ? terminalContainerEl.getBoundingClientRect() : { left: 0, top: 0, width: 360, height: 600 };
+          const cellWidth = (rect.width / (term.cols || 80)) || 9;
+          const cellHeight = (rect.height / (term.rows || 24)) || 17;
+          const col = Math.min(term.cols || 80, Math.max(1, Math.floor((currentX - rect.left) / cellWidth) + 1));
+          const row = Math.min(term.rows || 24, Math.max(1, Math.floor((currentY - rect.top) / cellHeight) + 1));
+
+          const count = Math.abs(lines);
+          const isUp = lines > 0;
+          const seq = isUp ? `\x1b[<64;${col};${row}M` : `\x1b[<65;${col};${row}M`;
+
+          if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
+            currentSocket.send(seq.repeat(count));
+          }
+
+          if (term && term.scrollLines) {
+            term.scrollLines(-lines);
+          }
+        }
+      }
+    }, { passive: true });
+
+    terminalContainerEl.addEventListener('touchend', () => {
+      if (!isSwiping) {
+        if (term && term.focus) {
+          term.focus();
+        }
+      }
+      isSwiping = false;
+    }, { passive: true });
+  }
+
   window.addEventListener('resize', handleResize);
+
+  // 移动端视觉视口 (visualViewport) 协同调度：当软键盘弹出或收起时动态适配
+  if (typeof window !== 'undefined' && window.visualViewport) {
+    window.visualViewport.addEventListener('resize', handleVisualViewportChange);
+    window.visualViewport.addEventListener('scroll', handleVisualViewportChange);
+  }
+
+  // 移动端检测：根据初始屏幕宽度更新辅助栏状态标记
+  updateMobileAccessoryLayout();
+}
+
+let resizeTimer = null;
+function handleVisualViewportChange() {
+  if (typeof window === 'undefined' || !window.visualViewport) return;
+  // 软键盘弹起时防止整个页面被滚出视野，锁定在顶部
+  window.scrollTo(0, 0);
+
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    handleResize();
+  }, 120);
+}
+
+function updateMobileAccessoryLayout() {
+  // 采用标准弹性 Flex 布局，无需 JS 手动计算 padding
+}
+
+function updateToggleAccessoryButton() {
+  const iconEl = document.getElementById('acc-toggle-icon');
+  const textEl = document.getElementById('acc-toggle-text');
+  if (!accBarEl || !accBarEl.classList) return;
+  const isCollapsed = accBarEl.classList.contains('collapsed');
+  if (iconEl) iconEl.textContent = isCollapsed ? '▼' : '▲';
+  if (textEl) textEl.textContent = isCollapsed ? '展开按键' : '折叠';
+}
+
+function toggleAccessoryBar() {
+  if (!accBarEl || !accBarEl.classList) return;
+  const isCollapsed = accBarEl.classList.contains('collapsed');
+  if (isCollapsed) {
+    accBarEl.classList.remove('collapsed');
+  } else {
+    accBarEl.classList.add('collapsed');
+  }
+  updateToggleAccessoryButton();
+  try {
+    localStorage.setItem('wsl_term_accessory_collapsed', (!isCollapsed) ? 'true' : 'false');
+  } catch {}
+  setTimeout(() => {
+    handleResize();
+  }, 50);
 }
 
 function handleResize() {
+  updateMobileAccessoryLayout();
   if (!fitAddon || !term) return;
   fitAddon.fit();
-  statusDimEl.textContent = `尺寸: ${term.cols}x${term.rows}`;
+  if (statusDimEl) {
+    statusDimEl.textContent = `尺寸: ${term.cols}x${term.rows}`;
+  }
   if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
     currentSocket.send(JSON.stringify({
       type: 'resize',
@@ -126,6 +288,9 @@ async function fetchWindows() {
           systemShellsList = data.systemShells;
           systemShellsSig = newExtSig;
           externalCountEl.textContent = systemShellsList.length;
+          if (drawerExternalCountEl) {
+            drawerExternalCountEl.textContent = systemShellsList.length;
+          }
           renderExternalShellsModal();
         }
       }
@@ -178,12 +343,22 @@ function renderTabs() {
   if (currentWin) {
     statusTargetEl.textContent = `窗口: ${currentWin.target} (${currentWin.name})`;
     statusCommandEl.textContent = `命令: ${currentWin.command}`;
-    statusPathEl.textContent = `工作目录: ${currentWin.path || '-'}`;
+    statusPathEl.textContent = `工作目录: ${shortenPath(currentWin.path)}`;
   } else {
     statusTargetEl.textContent = '窗口: -';
     statusCommandEl.textContent = '命令: -';
     statusPathEl.textContent = '工作目录: -';
   }
+}
+
+function shortenPath(p) {
+  if (!p || p === '-') return '-';
+  if (p.length <= 26) return p;
+  const parts = p.split('/');
+  if (parts.length > 2) {
+    return '.../' + parts.slice(-2).join('/');
+  }
+  return p;
 }
 
 async function renameWindow(target, oldName) {
@@ -352,7 +527,10 @@ function connectToWindow(target) {
     connectionBadgeEl.className = 'badge badge-connected';
     connectionBadgeEl.textContent = '● 已连接';
     handleResize();
-    term.focus();
+    // 仅在桌面环境聚焦；触控移动设备不自动聚焦，避免切换 tab 时强制唤起手机输入法
+    if (typeof window === 'undefined' || !window.matchMedia || !window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
+      term.focus();
+    }
   };
 
   socket.onmessage = (event) => {
@@ -483,6 +661,180 @@ btnRefresh.addEventListener('click', () => {
   fetchWindows();
 });
 
+const keyMap = {
+  ESC: '\x1b',
+  TAB: '\t',
+  ENTER: '\r',
+  CTRL_C: '\x03',
+  UP: '\x1b[A',
+  DOWN: '\x1b[B',
+  RIGHT: '\x1b[C',
+  LEFT: '\x1b[D',
+  PIPE: '|',
+  SLASH: '/',
+  DASH: '-',
+  TILDE: '~'
+};
+
+function sendTerminalData(data) {
+  if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
+    currentSocket.send(data);
+  }
+  // 注意：不要在此处调用 term.focus()！
+  // 移动端在 xterm 隐藏 textarea 上调用 .focus() 会强制弹起手机原生软键盘。
+  // 用户点击虚拟控制按键仅发送 ANSI 控制字符，不得触发软键盘弹出。
+}
+
+function initAccessoryBar() {
+  if (!accBarEl || !accBarEl.addEventListener) return;
+
+  // 阻止虚拟按键点击时的默认焦点转移，避免误触系统输入法
+  accBarEl.addEventListener('mousedown', (e) => {
+    const btn = e.target.closest?.('.acc-btn, .acc-toggle-btn') || e.target;
+    if (btn && btn !== accBarEl) {
+      e.preventDefault();
+    }
+  });
+
+  accBarEl.addEventListener('click', (e) => {
+    let btn = e.target;
+    while (btn && btn !== accBarEl && !btn.getAttribute?.('data-key') && btn.id !== 'btn-toggle-accessory') {
+      btn = btn.parentElement;
+    }
+    if (!btn || btn === accBarEl) return;
+
+    const key = btn.getAttribute ? btn.getAttribute('data-key') : null;
+    if (key === 'CTRL') {
+      isCtrlActive = !isCtrlActive;
+      if (btnCtrl && btnCtrl.classList) {
+        if (isCtrlActive) btnCtrl.classList.add('sticky-active');
+        else btnCtrl.classList.remove('sticky-active');
+      }
+      return;
+    }
+
+    if (key === 'ALT') {
+      isAltActive = !isAltActive;
+      if (btnAlt && btnAlt.classList) {
+        if (isAltActive) btnAlt.classList.add('sticky-active');
+        else btnAlt.classList.remove('sticky-active');
+      }
+      return;
+    }
+
+    if (key === 'KEYBOARD') {
+      if (term) term.focus();
+      return;
+    }
+
+    if (key && keyMap[key]) {
+      sendTerminalData(keyMap[key]);
+      return;
+    }
+
+    if (btn.id === 'btn-toggle-accessory' || (accBarEl.classList && accBarEl.classList.contains('collapsed'))) {
+      toggleAccessoryBar();
+      return;
+    }
+  });
+
+  try {
+    const isCollapsedSaved = localStorage.getItem('wsl_term_accessory_collapsed') === 'true';
+    if (isCollapsedSaved && accBarEl && accBarEl.classList) {
+      accBarEl.classList.add('collapsed');
+    }
+    updateToggleAccessoryButton();
+  } catch {}
+
+  if (btnToggleKeys && btnToggleKeys.addEventListener) {
+    btnToggleKeys.addEventListener('click', toggleAccessoryBar);
+  }
+}
+
+function openMobileDrawer() {
+  if (mobileMenuDrawerEl && mobileMenuDrawerEl.classList) {
+    mobileMenuDrawerEl.classList.remove('hidden');
+  }
+  if (mobileMenuBackdropEl && mobileMenuBackdropEl.classList) {
+    mobileMenuBackdropEl.classList.remove('hidden');
+  }
+}
+
+function closeMobileDrawer() {
+  if (mobileMenuDrawerEl && mobileMenuDrawerEl.classList) {
+    mobileMenuDrawerEl.classList.add('hidden');
+  }
+  if (mobileMenuBackdropEl && mobileMenuBackdropEl.classList) {
+    mobileMenuBackdropEl.classList.add('hidden');
+  }
+}
+
+function initMobileMenu() {
+  if (btnMobileMenu && btnMobileMenu.addEventListener) {
+    btnMobileMenu.addEventListener('click', openMobileDrawer);
+  }
+  if (btnCloseDrawer && btnCloseDrawer.addEventListener) {
+    btnCloseDrawer.addEventListener('click', closeMobileDrawer);
+  }
+  if (mobileMenuBackdropEl && mobileMenuBackdropEl.addEventListener) {
+    mobileMenuBackdropEl.addEventListener('click', closeMobileDrawer);
+  }
+
+  if (btnDrawerFontDec && btnDrawerFontDec.addEventListener) {
+    btnDrawerFontDec.addEventListener('click', () => {
+      currentFontSize = Math.max(10, currentFontSize - 1);
+      if (term && fitAddon) {
+        term.options.fontSize = currentFontSize;
+        handleResize();
+      }
+    });
+  }
+
+  if (btnDrawerFontInc && btnDrawerFontInc.addEventListener) {
+    btnDrawerFontInc.addEventListener('click', () => {
+      currentFontSize = Math.min(26, currentFontSize + 1);
+      if (term && fitAddon) {
+        term.options.fontSize = currentFontSize;
+        handleResize();
+      }
+    });
+  }
+
+  if (btnDrawerFullscreen && btnDrawerFullscreen.addEventListener) {
+    btnDrawerFullscreen.addEventListener('click', () => {
+      closeMobileDrawer();
+      toggleFullscreen();
+    });
+  }
+
+  if (btnDrawerRefresh && btnDrawerRefresh.addEventListener) {
+    btnDrawerRefresh.addEventListener('click', () => {
+      closeMobileDrawer();
+      windowListSig = '';
+      systemShellsSig = '';
+      fetchWindows();
+    });
+  }
+
+  if (btnDrawerToggleKeys && btnDrawerToggleKeys.addEventListener) {
+    btnDrawerToggleKeys.addEventListener('click', () => {
+      closeMobileDrawer();
+      toggleAccessoryBar();
+    });
+  }
+
+  if (btnDrawerExternalShells && btnDrawerExternalShells.addEventListener) {
+    btnDrawerExternalShells.addEventListener('click', () => {
+      closeMobileDrawer();
+      if (externalModalEl && externalModalEl.classList) {
+        externalModalEl.classList.remove('hidden');
+      }
+    });
+  }
+}
+
 initTerminal();
+initAccessoryBar();
+initMobileMenu();
 fetchWindows();
 setInterval(fetchWindows, 1000);

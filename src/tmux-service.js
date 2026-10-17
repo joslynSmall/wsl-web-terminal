@@ -23,6 +23,13 @@ export class TmuxService {
       ]);
     }
 
+    await execFileAsync('tmux', [
+      'set-option', '-t', this.defaultSession, 'terminal-overrides', ',xterm*:smcup@:rmcup@'
+    ]).catch(() => {});
+    await execFileAsync('tmux', [
+      'set-option', '-t', this.defaultSession, 'mouse', 'on'
+    ]).catch(() => {});
+
     const { stdout } = await execFileAsync('tmux', [
       'list-sessions', '-F', '#{session_name}:::#{session_attached}'
     ]);

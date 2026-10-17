@@ -152,13 +152,9 @@ wss.on('connection', (ws, request, url) => {
     ptyProcess = pty.spawn('tmux', [
       'new-session',
       '-t',
-      session,
+      target,
       '-s',
-      webClientSession,
-      ';',
-      'select-window',
-      '-t',
-      `:${winIndex}`
+      webClientSession
     ], {
       name: 'xterm-256color',
       cols,

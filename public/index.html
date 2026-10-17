@@ -2,10 +2,15 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#11111b">
+  <meta name="format-detection" content="telephone=no">
   <title>WSL Web Terminal Hub</title>
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?v=6">
 </head>
 <body>
   <div id="app-root" class="app-layout">
@@ -17,11 +22,13 @@
         <button type="button" id="btn-external-shells" class="badge badge-system" title="查看所有检测到的外部 Shell 窗口">🔍 外部终端: <span id="external-count">0</span></button>
       </div>
       <div class="actions">
+        <button type="button" id="btn-toggle-keys" class="btn btn-secondary" title="显示或隐藏底部虚拟按键">⌨️ 按键</button>
         <button type="button" id="btn-fullscreen" class="btn btn-secondary" title="切换浏览器全屏模式 (F11)">⛶ 全屏模式</button>
         <button type="button" id="btn-font-dec" class="btn btn-secondary" title="缩小终端字号">A-</button>
         <button type="button" id="btn-font-inc" class="btn btn-secondary" title="放大终端字号">A+</button>
         <button type="button" id="btn-new-window" class="btn btn-primary" title="新建 Shell 窗口">➕ 新建窗口</button>
         <button type="button" id="btn-refresh" class="btn btn-secondary" title="刷新窗口列表">🔄 刷新</button>
+        <button type="button" id="btn-mobile-menu" class="btn btn-secondary mobile-only-btn" title="更多功能">☰</button>
       </div>
     </header>
 
@@ -29,7 +36,27 @@
       <div id="tabs-list" class="tabs-list"></div>
     </nav>
 
-    <main class="terminal-wrapper">
+    <div id="terminal-accessory-bar" class="accessory-bar">
+      <div class="accessory-scroller">
+        <button type="button" class="acc-btn acc-btn-keyboard" data-key="KEYBOARD" title="唤起/聚焦手机输入法">⌨️</button>
+        <button type="button" class="acc-btn" data-key="ESC" title="Escape">ESC</button>
+        <button type="button" class="acc-btn" data-key="TAB" title="Tab 补全">TAB</button>
+        <button type="button" class="acc-btn" data-key="CTRL" id="acc-btn-ctrl" title="Ctrl 组合键 (点击进入黏滞状态)">CTRL</button>
+        <button type="button" class="acc-btn acc-btn-enter" data-key="ENTER" title="回车执行 (Enter)">ENTER ↵</button>
+        <button type="button" class="acc-btn" data-key="CTRL_C" title="中断进程 (Ctrl+C)">CTRL+C</button>
+        <button type="button" class="acc-btn" data-key="UP" title="方向键 上">↑</button>
+        <button type="button" class="acc-btn" data-key="DOWN" title="方向键 下">↓</button>
+        <button type="button" class="acc-btn" data-key="LEFT" title="方向键 左">←</button>
+        <button type="button" class="acc-btn" data-key="RIGHT" title="方向键 右">→</button>
+        <button type="button" class="acc-btn" data-key="PIPE" title="管道符 |">|</button>
+        <button type="button" class="acc-btn" data-key="SLASH" title="路径斜杠 /">/</button>
+        <button type="button" class="acc-btn" data-key="DASH" title="破折号 -">-</button>
+        <button type="button" class="acc-btn" data-key="TILDE" title="主目录 ~">~</button>
+      </div>
+      <button type="button" id="btn-toggle-accessory" class="acc-toggle-btn" title="折叠或展开按键栏"><span id="acc-toggle-icon">▲</span> <span id="acc-toggle-text">折叠</span></button>
+    </div>
+
+    <main id="terminal-wrapper" class="terminal-wrapper">
       <div id="terminal-container" class="terminal-container"></div>
     </main>
 
@@ -46,6 +73,32 @@
       </div>
     </footer>
   </div>
+
+  <div id="mobile-menu-drawer" class="mobile-drawer hidden">
+    <div class="mobile-drawer-header">
+      <span class="mobile-drawer-title">快捷操作与功能</span>
+      <button type="button" id="btn-close-drawer" class="btn-close">&times;</button>
+    </div>
+    <div class="mobile-drawer-body">
+      <div class="drawer-section">
+        <div class="drawer-section-title">终端字号</div>
+        <div class="drawer-btn-grid">
+          <button type="button" id="btn-drawer-font-dec" class="btn btn-secondary">A- 缩小字号</button>
+          <button type="button" id="btn-drawer-font-inc" class="btn btn-secondary">A+ 放大字号</button>
+        </div>
+      </div>
+      <div class="drawer-section">
+        <div class="drawer-section-title">视图与服务</div>
+        <div class="drawer-btn-list">
+          <button type="button" id="btn-drawer-toggle-keys" class="btn btn-secondary">⌨️ 切换虚拟按键栏</button>
+          <button type="button" id="btn-drawer-fullscreen" class="btn btn-secondary">⛶ 切换全屏模式</button>
+          <button type="button" id="btn-drawer-refresh" class="btn btn-secondary">🔄 刷新窗口列表</button>
+          <button type="button" id="btn-drawer-external-shells" class="btn btn-secondary">🔍 外部 Shell 窗口 (<span id="drawer-external-count">0</span>)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="mobile-menu-backdrop" class="drawer-backdrop hidden"></div>
 
   <div id="external-modal" class="modal-overlay hidden">
     <div class="modal-card">
@@ -68,6 +121,6 @@
   <script src="/vendor/xterm/lib/xterm.js"></script>
   <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
   <script src="/vendor/addon-web-links/lib/addon-web-links.js"></script>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=6"></script>
 </body>
 </html>
