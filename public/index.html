@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WSL Web Terminal Hub</title>
+  <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app-root" class="app-layout">
+    <header class="top-nav">
+      <div class="brand">
+        <span class="brand-icon">⚡</span>
+        <span class="brand-title">WSL Terminal Hub</span>
+        <span id="connection-badge" class="badge badge-disconnected">● 未连接</span>
+        <button type="button" id="btn-external-shells" class="badge badge-system" title="查看所有检测到的外部 Shell 窗口">🔍 外部终端: <span id="external-count">0</span></button>
+      </div>
+      <div class="actions">
+        <button type="button" id="btn-fullscreen" class="btn btn-secondary" title="切换浏览器全屏模式 (F11)">⛶ 全屏模式</button>
+        <button type="button" id="btn-font-dec" class="btn btn-secondary" title="缩小终端字号">A-</button>
+        <button type="button" id="btn-font-inc" class="btn btn-secondary" title="放大终端字号">A+</button>
+        <button type="button" id="btn-new-window" class="btn btn-primary" title="新建 Shell 窗口">➕ 新建窗口</button>
+        <button type="button" id="btn-refresh" class="btn btn-secondary" title="刷新窗口列表">🔄 刷新</button>
+      </div>
+    </header>
+
+    <nav class="tabs-bar">
+      <div id="tabs-list" class="tabs-list"></div>
+    </nav>
+
+    <main class="terminal-wrapper">
+      <div id="terminal-container" class="terminal-container"></div>
+    </main>
+
+    <footer class="status-bar">
+      <div class="status-left">
+        <span id="status-target">窗口: -</span>
+        <span class="sep">|</span>
+        <span id="status-command">命令: -</span>
+        <span class="sep">|</span>
+        <span id="status-dim">尺寸: -</span>
+      </div>
+      <div class="status-right">
+        <span id="status-path">工作目录: -</span>
+      </div>
+    </footer>
+  </div>
+
+  <div id="external-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">🔍 检测到的外部 Linux Shell 窗口</div>
+        <button type="button" id="btn-close-modal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-tip">检测到底层 WSL 运行中的独立 Shell 终端。在目标终端中输入下方命令即可将其无缝接入 Web 页面：</p>
+        <div class="code-box">
+          <code id="join-cmd-text">wsl-term</code>
+          <button type="button" id="btn-copy-join" class="btn btn-secondary">📋 复制</button>
+        </div>
+        <div class="external-list-header">活跃外部终端列表（点击直接在 Web 端打开使用）：</div>
+        <div id="external-shells-list" class="external-shells-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/vendor/xterm/lib/xterm.js"></script>
+  <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
+  <script src="/vendor/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
