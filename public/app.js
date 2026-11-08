@@ -1,19 +1,36 @@
 let term = null;
-let fitAddon = null;
 let currentSocket = null;
-let activeTarget = null;
-let windowList = [];
-let windowListSig = '';
-let systemShellsList = [];
-let systemShellsSig = '';
-let currentFontSize = 14;
+let activeId = null;
+let sessionList = [];
+let sessionListSig = '';
+let fitToScreen = false; // 全屏时自动选能把整个终端放下的最大字号；点 A-/A+ 后交还手动控制
+let lastFocusedId = null; // Tabby 里上一次有焦点的会话，用来发现"焦点变了"
+let bridgeCount = 0;
+let baseFontSize = defaultFontSize();
+let reconnectDelay = 1000;
+let nextReconnectAt = 0;
+let lastPanAt = 0;
+let revealQueued = false;
+
+const MIN_FONT_SIZE = 8;
+const MAX_FONT_SIZE = 26;
+const FOLLOW_PAUSE_MS = 3000;
+
+// 正常的网页字号：桌面 14px，手机 12px。终端的列数行数由 Tabby 决定，放不下时在页面里滚动，不缩小字体。
+function defaultFontSize() {
+  try {
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 768px)').matches) return 12;
+  } catch {}
+  return 14;
+}
+const MAX_RECONNECT_DELAY = 10000;
 
 const appRootEl = document.getElementById('app-root');
+const terminalWrapperEl = document.getElementById('terminal-wrapper');
 const tabsListEl = document.getElementById('tabs-list');
 const terminalContainerEl = document.getElementById('terminal-container');
 const connectionBadgeEl = document.getElementById('connection-badge');
-const externalCountEl = document.getElementById('external-count');
-const btnExternalShells = document.getElementById('btn-external-shells');
+const emptyStateEl = document.getElementById('empty-state');
 
 const btnFullscreen = document.getElementById('btn-fullscreen');
 const btnNewWindow = document.getElementById('btn-new-window');
@@ -22,20 +39,12 @@ const btnFontDec = document.getElementById('btn-font-dec');
 const btnFontInc = document.getElementById('btn-font-inc');
 
 const statusTargetEl = document.getElementById('status-target');
-const statusCommandEl = document.getElementById('status-command');
+const statusWindowEl = document.getElementById('status-window');
 const statusDimEl = document.getElementById('status-dim');
-const statusPathEl = document.getElementById('status-path');
-
-const externalModalEl = document.getElementById('external-modal');
-const btnCloseModal = document.getElementById('btn-close-modal');
-const btnCopyJoin = document.getElementById('btn-copy-join');
-const joinCmdText = document.getElementById('join-cmd-text');
-const externalShellsListEl = document.getElementById('external-shells-list');
 
 const accBarEl = document.getElementById('terminal-accessory-bar');
 const btnCtrl = document.getElementById('acc-btn-ctrl');
 const btnAlt = document.getElementById('acc-btn-alt');
-const btnToggleAccessory = document.getElementById('btn-toggle-accessory');
 const btnToggleKeys = document.getElementById('btn-toggle-keys');
 const btnDrawerToggleKeys = document.getElementById('btn-drawer-toggle-keys');
 let isCtrlActive = false;
@@ -49,14 +58,34 @@ const btnDrawerFontDec = document.getElementById('btn-drawer-font-dec');
 const btnDrawerFontInc = document.getElementById('btn-drawer-font-inc');
 const btnDrawerFullscreen = document.getElementById('btn-drawer-fullscreen');
 const btnDrawerRefresh = document.getElementById('btn-drawer-refresh');
-const btnDrawerExternalShells = document.getElementById('btn-drawer-external-shells');
-const drawerExternalCountEl = document.getElementById('drawer-external-count');
+
+// 终端查询(设备属性、光标位置、颜色等)的回复由 Tabby 那一侧的 xterm 负责。
+// 网页里的 xterm 如果也回复，回复会被当成键盘输入打进 shell(例如命令前多出 "[?1;2c")，所以在解析阶段把查询吞掉。
+function suppressTerminalReplies(t) {
+  const parser = t && t.parser;
+  if (!parser || !parser.registerCsiHandler) return;
+  const swallow = () => true;
+  [
+    { final: 'c' }, { prefix: '>', final: 'c' }, { prefix: '=', final: 'c' }, // DA1 / DA2 / DA3
+    { final: 'n' }, { prefix: '?', final: 'n' },                               // DSR 状态与光标位置
+    { intermediates: '$', final: 'p' }, { prefix: '?', intermediates: '$', final: 'p' }, // DECRQM
+    { final: 't' },                                                            // 窗口操作报告
+    { prefix: '>', final: 'q' }                                                // XTVERSION
+  ].forEach((id) => parser.registerCsiHandler(id, swallow));
+  if (parser.registerOscHandler) {
+    // 只吞颜色查询(以 ? 结尾)，真正设置颜色的序列照常处理
+    [4, 10, 11, 12, 17, 19].forEach((ident) => parser.registerOscHandler(ident, (data) => /(^|;)\?$/.test(data)));
+  }
+  if (parser.registerDcsHandler) {
+    parser.registerDcsHandler({ intermediates: '$', final: 'q' }, swallow); // DECRQSS
+  }
+}
 
 function initTerminal() {
   term = new window.Terminal({
     cursorBlink: true,
     fontFamily: '"Cascadia Code", "Fira Code", Consolas, "Courier New", monospace',
-    fontSize: currentFontSize,
+    fontSize: baseFontSize,
     theme: {
       background: '#11111b',
       foreground: '#cdd6f4',
@@ -82,16 +111,13 @@ function initTerminal() {
     }
   });
 
-  fitAddon = new window.FitAddon.FitAddon();
-  term.loadAddon(fitAddon);
+  suppressTerminalReplies(term);
+
   if (window.WebLinksAddon && window.WebLinksAddon.WebLinksAddon) {
     term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
   }
 
   term.open(terminalContainerEl);
-  requestAnimationFrame(() => {
-    fitAddon.fit();
-  });
 
   term.onData((data) => {
     let payload = data;
@@ -116,64 +142,85 @@ function initTerminal() {
       payload = '\x1b' + payload;
     }
 
-    if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
-      currentSocket.send(payload);
-    }
+    sendInput(payload);
   });
 
-  // 移动端全功能触控滑动手势引擎：将手机屏幕的上下滑动手势转换为终端滚动与 SGR 鼠标滚轮信号
-  let touchStartY = 0;
+  // 移动端单指拖动：
+  //  - 横向拖动：平移页面(终端比屏幕宽时)
+  //  - 竖向拖动：程序开启了鼠标追踪(vim/less/htop 等)时转成 SGR 滚轮信号；
+  //    否则先平移页面(终端比屏幕高时)，平移到头后再滚动终端的回滚缓冲区
   let touchStartX = 0;
+  let touchStartY = 0;
+  let touchLastX = 0;
   let touchLastY = 0;
+  let touchAxis = null;
   let isSwiping = false;
   let scrollAccumulator = 0;
 
   if (terminalContainerEl && terminalContainerEl.addEventListener) {
     terminalContainerEl.addEventListener('touchstart', (e) => {
       if (!e.touches || e.touches.length !== 1) return;
-      touchStartY = e.touches[0].clientY;
-      touchStartX = e.touches[0].clientX;
-      touchLastY = touchStartY;
+      touchStartX = touchLastX = e.touches[0].clientX;
+      touchStartY = touchLastY = e.touches[0].clientY;
+      touchAxis = null;
       isSwiping = false;
       scrollAccumulator = 0;
     }, { passive: true });
 
     terminalContainerEl.addEventListener('touchmove', (e) => {
       if (!e.touches || e.touches.length !== 1) return;
-      const currentY = e.touches[0].clientY;
       const currentX = e.touches[0].clientX;
+      const currentY = e.touches[0].clientY;
+      const diffX = currentX - touchLastX;
       const diffY = currentY - touchLastY;
-      const totalDistY = Math.abs(currentY - touchStartY);
-      const totalDistX = Math.abs(currentX - touchStartX);
+      touchLastX = currentX;
+      touchLastY = currentY;
 
-      if (totalDistY > 6 && totalDistY > totalDistX) {
-        isSwiping = true;
-        touchLastY = currentY;
+      if (!touchAxis) {
+        const distX = Math.abs(currentX - touchStartX);
+        const distY = Math.abs(currentY - touchStartY);
+        if (Math.max(distX, distY) <= 6) return;
+        touchAxis = distY > distX ? 'y' : 'x';
+      }
+      isSwiping = true;
+      lastPanAt = Date.now();
+
+      if (touchAxis === 'x') {
+        terminalContainerEl.scrollLeft = (terminalContainerEl.scrollLeft || 0) - diffX;
+        return;
+      }
+
+      const mouseMode = term.modes && term.modes.mouseTrackingMode;
+      if (mouseMode && mouseMode !== 'none') {
         scrollAccumulator += diffY;
+        const lines = Math.trunc(scrollAccumulator / 16);
+        if (lines === 0) return;
+        scrollAccumulator %= 16;
+        const screen = term.element && term.element.querySelector ? term.element.querySelector('.xterm-screen') : null;
+        const rect = (screen || terminalContainerEl).getBoundingClientRect ? (screen || terminalContainerEl).getBoundingClientRect() : { left: 0, top: 0, width: 360, height: 600 };
+        const cellWidth = (rect.width / (term.cols || 80)) || 9;
+        const cellHeight = (rect.height / (term.rows || 24)) || 17;
+        const col = Math.min(term.cols || 80, Math.max(1, Math.floor((currentX - rect.left) / cellWidth) + 1));
+        const row = Math.min(term.rows || 24, Math.max(1, Math.floor((currentY - rect.top) / cellHeight) + 1));
+        const seq = lines > 0 ? `\x1b[<64;${col};${row}M` : `\x1b[<65;${col};${row}M`;
+        sendInput(seq.repeat(Math.abs(lines)));
+        return;
+      }
 
-        const step = 16;
-        if (Math.abs(scrollAccumulator) >= step) {
-          const lines = Math.trunc(scrollAccumulator / step);
-          scrollAccumulator %= step;
-
-          const rect = terminalContainerEl.getBoundingClientRect ? terminalContainerEl.getBoundingClientRect() : { left: 0, top: 0, width: 360, height: 600 };
-          const cellWidth = (rect.width / (term.cols || 80)) || 9;
-          const cellHeight = (rect.height / (term.rows || 24)) || 17;
-          const col = Math.min(term.cols || 80, Math.max(1, Math.floor((currentX - rect.left) / cellWidth) + 1));
-          const row = Math.min(term.rows || 24, Math.max(1, Math.floor((currentY - rect.top) / cellHeight) + 1));
-
-          const count = Math.abs(lines);
-          const isUp = lines > 0;
-          const seq = isUp ? `\x1b[<64;${col};${row}M` : `\x1b[<65;${col};${row}M`;
-
-          if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
-            currentSocket.send(seq.repeat(count));
-          }
-
-          if (term && term.scrollLines) {
-            term.scrollLines(-lines);
-          }
-        }
+      // 先平移页面，没平移掉的部分用来滚动回滚缓冲区
+      let remaining = diffY;
+      const maxTop = terminalContainerEl.scrollHeight - terminalContainerEl.clientHeight;
+      if (maxTop > 1) {
+        const before = terminalContainerEl.scrollTop || 0;
+        const after = Math.min(maxTop, Math.max(0, before - diffY));
+        terminalContainerEl.scrollTop = after;
+        remaining = diffY - (before - after);
+      }
+      scrollAccumulator += remaining;
+      const lines = Math.trunc(scrollAccumulator / 16);
+      if (lines !== 0) {
+        scrollAccumulator %= 16;
+        if (term.scrollLines) term.scrollLines(-lines);
       }
     }, { passive: true });
 
@@ -189,14 +236,11 @@ function initTerminal() {
 
   window.addEventListener('resize', handleResize);
 
-  // 移动端视觉视口 (visualViewport) 协同调度：当软键盘弹出或收起时动态适配
+  // 软键盘弹出/收起时可视区会变化，重新让光标保持可见
   if (typeof window !== 'undefined' && window.visualViewport) {
     window.visualViewport.addEventListener('resize', handleVisualViewportChange);
     window.visualViewport.addEventListener('scroll', handleVisualViewportChange);
   }
-
-  // 移动端检测：根据初始屏幕宽度更新辅助栏状态标记
-  updateMobileAccessoryLayout();
 }
 
 let resizeTimer = null;
@@ -209,10 +253,6 @@ function handleVisualViewportChange() {
   resizeTimer = setTimeout(() => {
     handleResize();
   }, 120);
-}
-
-function updateMobileAccessoryLayout() {
-  // 采用标准弹性 Flex 布局，无需 JS 手动计算 padding
 }
 
 function updateToggleAccessoryButton() {
@@ -241,293 +281,322 @@ function toggleAccessoryBar() {
   }, 50);
 }
 
-function handleResize() {
-  updateMobileAccessoryLayout();
-  if (!fitAddon || !term) return;
-  fitAddon.fit();
-  if (statusDimEl) {
-    statusDimEl.textContent = `尺寸: ${term.cols}x${term.rows}`;
-  }
-  if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
-    currentSocket.send(JSON.stringify({
-      type: 'resize',
-      cols: term.cols,
-      rows: term.rows
-    }));
+// 终端的列数和行数由 Tabby 决定，网页不会反向修改 Tabby 的尺寸，也不缩小字体；比屏幕大时在页面里滚动。
+// 唯一的例外是全屏：此时可视区通常比 Tabby 的终端大，按基础字号会在下方/右侧留一大片空白，
+// 所以全屏时挑能把整个终端放下的最大字号。只放大、不缩小：放不下时保持基础字号，靠滚动查看。
+function applyFontSize() {
+  if (!term) return;
+  const target = (fitToScreen && fitFontSize()) || baseFontSize;
+  if (term.options.fontSize !== target) {
+    term.options.fontSize = target;
   }
 }
 
-async function fetchWindows() {
-  try {
-    const res = await fetch('/api/windows');
-    const data = await res.json();
-    if (data.success) {
-      if (Array.isArray(data.windows)) {
-        const newSig = data.windows.map(w => `${w.target}:${w.name}`).join('|');
-        if (newSig !== windowListSig) {
-          windowList = data.windows;
-          windowListSig = newSig;
-          
-          if (!windowList.find(w => w.target === activeTarget)) {
-            activeTarget = windowList.length > 0 ? windowList[0].target : null;
-            if (activeTarget) {
-              connectToWindow(activeTarget);
-            } else if (term) {
-              term.reset();
-            }
-          }
-          renderTabs();
-        } else if (activeTarget && (!currentSocket || (currentSocket.readyState !== WebSocket.OPEN && currentSocket.readyState !== WebSocket.CONNECTING))) {
-          connectToWindow(activeTarget);
-        }
-      }
+// 按实测的像素尺寸找字号：单元格宽高会取整，不能只靠比例推算。设置字号后 .xterm-screen 的尺寸立即更新。
+function fitFontSize() {
+  const screen = term && term.element && term.element.querySelector ? term.element.querySelector('.xterm-screen') : null;
+  const availW = terminalWrapperEl && terminalWrapperEl.clientWidth;
+  const availH = terminalWrapperEl && terminalWrapperEl.clientHeight;
+  if (!screen || !term.cols || !term.rows || !(availW > 0) || !(availH > 0)) return 0;
+  const floor = Math.min(baseFontSize, MAX_FONT_SIZE);
+  const clamp = (n) => Math.min(MAX_FONT_SIZE, Math.max(floor, n));
+  const fits = () => screen.offsetWidth <= availW && screen.offsetHeight <= availH;
 
-      if (Array.isArray(data.systemShells)) {
-        const newExtSig = data.systemShells.map(s => `${s.pid}:${s.runningCommand}`).join('|');
-        if (newExtSig !== systemShellsSig) {
-          systemShellsList = data.systemShells;
-          systemShellsSig = newExtSig;
-          externalCountEl.textContent = systemShellsList.length;
-          if (drawerExternalCountEl) {
-            drawerExternalCountEl.textContent = systemShellsList.length;
-          }
-          renderExternalShellsModal();
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Failed to fetch windows:', err);
+  let size = Number(term.options.fontSize) || baseFontSize;
+  for (let i = 0; i < 4; i++) {
+    const w = screen.offsetWidth;
+    const h = screen.offsetHeight;
+    if (!(w > 0) || !(h > 0)) return 0;
+    const next = clamp(Math.floor(size * Math.min(availW / w, availH / h)));
+    if (next === size) break;
+    size = next;
+    term.options.fontSize = size;
   }
+  while (size > floor && !fits()) {
+    size -= 1;
+    term.options.fontSize = size;
+  }
+  return size;
 }
 
-function renderTabs() {
-  tabsListEl.innerHTML = '';
-  windowList.forEach((win) => {
-    const tabEl = document.createElement('div');
-    tabEl.className = `tab-item ${win.target === activeTarget ? 'active' : ''}`;
-    tabEl.title = '双击可重命名此窗口';
-    
-    const labelSpan = document.createElement('span');
-    labelSpan.textContent = `[#${win.index}] ${win.name}`;
-    tabEl.appendChild(labelSpan);
-
-    if (windowList.length > 1) {
-      const closeBtn = document.createElement('span');
-      closeBtn.className = 'tab-close';
-      closeBtn.innerHTML = '&times;';
-      closeBtn.title = '关闭此窗口';
-      closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        closeWindow(win.target);
-      });
-      tabEl.appendChild(closeBtn);
-    }
-
-    tabEl.addEventListener('click', () => {
-      if (activeTarget !== win.target) {
-        activeTarget = win.target;
-        renderTabs();
-        connectToWindow(win.target);
-      }
-    });
-
-    tabEl.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      renameWindow(win.target, win.name);
-    });
-
-    tabsListEl.appendChild(tabEl);
-  });
-
-  const currentWin = windowList.find(w => w.target === activeTarget);
-  if (currentWin) {
-    statusTargetEl.textContent = `窗口: ${currentWin.target} (${currentWin.name})`;
-    statusCommandEl.textContent = `命令: ${currentWin.command}`;
-    statusPathEl.textContent = `工作目录: ${shortenPath(currentWin.path)}`;
-  } else {
-    statusTargetEl.textContent = '窗口: -';
-    statusCommandEl.textContent = '命令: -';
-    statusPathEl.textContent = '工作目录: -';
-  }
+// 让光标所在的格子保持在可视区内。用户刚手动平移过的几秒内不打扰他。
+function scheduleReveal(force) {
+  if (force) lastPanAt = 0;
+  if (Date.now() - lastPanAt < FOLLOW_PAUSE_MS || revealQueued) return;
+  revealQueued = true;
+  const run = () => {
+    revealQueued = false;
+    revealCursor();
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+  else run();
 }
 
-function shortenPath(p) {
-  if (!p || p === '-') return '-';
-  if (p.length <= 26) return p;
-  const parts = p.split('/');
-  if (parts.length > 2) {
-    return '.../' + parts.slice(-2).join('/');
+// 当前屏幕里最后一个有文字的行号(0 起算)；取不到缓冲区行时退回光标所在行
+function lastContentRow(buf) {
+  if (typeof buf.getLine !== 'function') return buf.cursorY;
+  for (let row = term.rows - 1; row > buf.cursorY; row--) {
+    const line = buf.getLine(buf.baseY + row);
+    if (line && line.translateToString(true).trim() !== '') return row;
   }
-  return p;
+  return buf.cursorY;
 }
 
-async function renameWindow(target, oldName) {
-  const newName = prompt(`请输入窗口 [${target}] 的新名称:`, oldName);
-  if (!newName || newName.trim() === '' || newName === oldName) return;
+function revealCursor() {
+  const el = terminalContainerEl;
+  const buf = term && term.buffer && term.buffer.active;
+  const screen = term && term.element && term.element.querySelector ? term.element.querySelector('.xterm-screen') : null;
+  if (!el || !buf || !screen || !term.rows || !term.cols || !el.clientHeight) return;
 
-  try {
-    const res = await fetch('/api/windows/rename', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target, name: newName.trim() })
-    });
-    const data = await res.json();
-    if (data.success) {
-      windowListSig = '';
-      await fetchWindows();
-    }
-  } catch (err) {
-    alert('重命名窗口失败: ' + err.message);
-  }
-}
+  const cellH = screen.offsetHeight / term.rows;
+  const cellW = screen.offsetWidth / term.cols;
+  const top = buf.cursorY * cellH;
+  const bottom = top + cellH;
 
-function renderExternalShellsModal() {
-  externalShellsListEl.innerHTML = '';
-  if (systemShellsList.length === 0) {
-    externalShellsListEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">未检测到外部活动 Shell</div>';
+  // 光标下面常有状态栏(Claude Code 的状态行等)，所以要让"最后一行有内容的行"也露出来；放不下时光标优先
+  const contentBottom = (lastContentRow(buf) + 1) * cellH;
+  let target = el.scrollTop;
+  const wanted = Math.max(bottom, contentBottom);
+  if (wanted > target + el.clientHeight) target = wanted - el.clientHeight;
+  if (top < target) target = top;
+  if (target !== el.scrollTop) el.scrollTop = target;
+
+  // 只超出一两个字符宽时不横向滚动：为了露出最右边的光标把第一列推出去，得不偿失
+  if (el.scrollWidth - el.clientWidth <= cellW * 2) {
+    if (el.scrollLeft) el.scrollLeft = 0;
     return;
   }
-
-  systemShellsList.forEach((shell) => {
-    const itemEl = document.createElement('div');
-    itemEl.className = 'shell-card';
-
-    const metaEl = document.createElement('div');
-    metaEl.className = 'shell-meta';
-
-    const titleEl = document.createElement('div');
-    titleEl.className = 'shell-title';
-    titleEl.textContent = `${shell.comm} (PID: ${shell.pid}) - ${shell.tty}`;
-
-    const pathEl = document.createElement('div');
-    pathEl.className = 'shell-path';
-    pathEl.textContent = `工作目录: ${shell.cwd || '-'}`;
-
-    const cmdRowEl = document.createElement('div');
-    cmdRowEl.className = 'shell-cmd-row';
-    const cmdLabelEl = document.createElement('span');
-    cmdLabelEl.className = 'shell-cmd-label';
-    cmdLabelEl.textContent = '正在运行:';
-    const cmdTextEl = document.createElement('span');
-    cmdTextEl.className = 'shell-cmd-text';
-    cmdTextEl.textContent = shell.runningCommand || '空闲 (待命中)';
-    cmdRowEl.appendChild(cmdLabelEl);
-    cmdRowEl.appendChild(cmdTextEl);
-
-    metaEl.appendChild(titleEl);
-    metaEl.appendChild(pathEl);
-    metaEl.appendChild(cmdRowEl);
-
-    const actionsEl = document.createElement('div');
-    actionsEl.className = 'shell-actions';
-
-    const badgeEl = document.createElement('span');
-    badgeEl.className = `shell-status-badge ${shell.isTmuxChild ? 'shell-status-managed' : 'shell-status-external'}`;
-    badgeEl.textContent = shell.isTmuxChild ? '● 已挂载' : '● 外部独立';
-    actionsEl.appendChild(badgeEl);
-
-    const useBtn = document.createElement('button');
-    useBtn.type = 'button';
-    useBtn.className = 'btn btn-primary btn-sm';
-    useBtn.textContent = '⚡ 立即在Web使用';
-    useBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      directAttachShell(shell);
-    });
-    actionsEl.appendChild(useBtn);
-
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'btn btn-danger btn-sm';
-    closeBtn.textContent = '✕ 关闭';
-    closeBtn.title = `结束终端进程 ${shell.comm} (PID: ${shell.pid})`;
-    closeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeExternalShell(shell);
-    });
-    actionsEl.appendChild(closeBtn);
-
-    itemEl.appendChild(metaEl);
-    itemEl.appendChild(actionsEl);
-
-    itemEl.addEventListener('click', () => {
-      directAttachShell(shell);
-    });
-
-    externalShellsListEl.appendChild(itemEl);
-  });
+  const left = buf.cursorX * cellW;
+  const right = left + cellW;
+  if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth;
+  else if (left < el.scrollLeft) el.scrollLeft = left;
 }
 
-async function directAttachShell(shell) {
-  try {
-    const res = await fetch('/api/attach-shell', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pid: shell.pid,
-        tty: shell.tty,
-        cwd: shell.cwd,
-        comm: shell.comm
-      })
-    });
-    const data = await res.json();
-    if (data.success && data.window) {
-      activeTarget = data.window.target;
-      externalModalEl.classList.add('hidden');
-      windowListSig = '';
-      await fetchWindows();
-      connectToWindow(activeTarget);
-    }
-  } catch (err) {
-    alert('接入窗口失败: ' + err.message);
+function updateStatusBar() {
+  const current = sessionList.find((s) => s.id === activeId);
+  statusTargetEl.textContent = current ? `会话: ${current.title}` : '会话: -';
+  statusWindowEl.textContent = current ? `Tabby 窗口: W${current.windowNo}` : 'Tabby 窗口: -';
+  statusDimEl.textContent = term && current ? `尺寸: ${term.cols}x${term.rows}` : '尺寸: -';
+}
+
+function handleResize() {
+  applyFontSize();
+  updateStatusBar();
+  scheduleReveal();
+}
+
+function applyTerminalSize(cols, rows) {
+  if (!term) return;
+  if (Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0) {
+    term.resize(cols, rows);
+  }
+  handleResize();
+}
+
+function sendInput(data) {
+  lastPanAt = 0; // 开始打字了，之后光标要跟着走
+  if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
+    currentSocket.send(JSON.stringify({ t: 'input', data }));
   }
 }
 
-async function closeExternalShell(shell) {
-  if (!confirm(`确定结束终端进程 ${shell.comm} (PID: ${shell.pid}) 吗？`)) return;
-
-  try {
-    const res = await fetch(`/api/system-shells/${shell.pid}`, {
-      method: 'DELETE'
-    });
-    const data = await res.json();
-    if (data.success) {
-      systemShellsSig = '';
-      await fetchWindows();
-    } else {
-      alert('关闭终端失败: ' + (data.error || '未知错误'));
-    }
-  } catch (err) {
-    alert('关闭终端请求异常: ' + err.message);
+function showEmptyState() {
+  if (!emptyStateEl) return;
+  if (sessionList.length > 0) {
+    emptyStateEl.classList.add('hidden');
+    return;
   }
+  emptyStateEl.textContent = bridgeCount === 0
+    ? '等待 Tabby 连接… 请确认已安装并启用 tabby-wsl-web-bridge 插件，且 Tabby 正在运行。'
+    : 'Tabby 里还没有终端标签页，点击右上角“新建窗口”。';
+  emptyStateEl.classList.remove('hidden');
 }
 
-function connectToWindow(target) {
+function disconnectSocket() {
   if (currentSocket) {
     const oldSocket = currentSocket;
     currentSocket = null;
     oldSocket.close();
   }
+}
+
+async function fetchSessions() {
+  try {
+    const res = await fetch('/api/sessions');
+    const data = await res.json();
+    if (!data.success || !Array.isArray(data.sessions)) return;
+
+    bridgeCount = data.bridges || 0;
+    const newSig = `${bridgeCount}|` + data.sessions.map((s) => `${s.id}:${s.windowNo}:${s.title}`).join('|');
+    const listChanged = newSig !== sessionListSig;
+    if (listChanged) {
+      sessionList = data.sessions;
+      sessionListSig = newSig;
+
+      if (!sessionList.find((s) => s.id === activeId)) {
+        // 刷新后默认选中 Tabby 里当前有焦点的终端，取不到时才退回第一个
+        const focused = sessionList.find((s) => s.id === data.focusedId);
+        activeId = focused ? focused.id : (sessionList.length > 0 ? sessionList[0].id : null);
+        if (activeId) {
+          connectToSession(activeId);
+        } else {
+          disconnectSocket();
+          if (term) term.reset();
+          connectionBadgeEl.className = 'badge badge-disconnected';
+          connectionBadgeEl.textContent = '● 未连接';
+        }
+      }
+      renderTabs();
+      showEmptyState();
+    }
+    followTabbyFocus(data.focusedId);
+    if (!listChanged && activeId && Date.now() >= nextReconnectAt && (!currentSocket || (currentSocket.readyState !== WebSocket.OPEN && currentSocket.readyState !== WebSocket.CONNECTING))) {
+      connectToSession(activeId);
+    }
+  } catch (err) {
+    console.error('Failed to fetch sessions:', err);
+  }
+}
+
+// Tabby 里切换了有焦点的终端时，网页跟着切。只在 focusedId 变化的那一刻切换，
+// 这样在网页里手动点了别的标签后，不会被下一次轮询拉回去。
+function followTabbyFocus(focusedId) {
+  if (!focusedId || focusedId === lastFocusedId) return;
+  lastFocusedId = focusedId;
+  if (focusedId === activeId || !sessionList.find((s) => s.id === focusedId)) return;
+  activeId = focusedId;
+  renderTabs();
+  connectToSession(focusedId);
+}
+
+function tabLabel(session) {
+  return bridgeCount > 1 ? `[W${session.windowNo}] ${session.title}` : session.title;
+}
+
+function renderTabs() {
+  tabsListEl.innerHTML = '';
+  sessionList.forEach((session) => {
+    const tabEl = document.createElement('div');
+    tabEl.className = `tab-item ${session.id === activeId ? 'active' : ''}`;
+    tabEl.title = '双击可重命名此标签页';
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = tabLabel(session);
+    tabEl.appendChild(labelSpan);
+
+    const closeBtn = document.createElement('span');
+    closeBtn.className = 'tab-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.title = '关闭此标签页 (会关闭 Tabby 里对应的终端)';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeSession(session);
+    });
+    tabEl.appendChild(closeBtn);
+
+    tabEl.addEventListener('click', () => {
+      if (activeId !== session.id) {
+        activeId = session.id;
+        renderTabs();
+        connectToSession(session.id);
+      }
+    });
+
+    tabEl.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      renameSession(session);
+    });
+
+    tabsListEl.appendChild(tabEl);
+  });
+
+  updateStatusBar();
+}
+
+async function postJson(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  return res.json();
+}
+
+async function renameSession(session) {
+  const newName = prompt(`请输入标签页 [${session.title}] 的新名称:`, session.title);
+  if (!newName || newName.trim() === '' || newName === session.title) return;
+
+  try {
+    const data = await postJson(`/api/sessions/${encodeURIComponent(session.id)}/rename`, { name: newName.trim() });
+    if (data.success) {
+      sessionListSig = '';
+      await fetchSessions();
+    } else {
+      alert('重命名失败: ' + (data.error || '未知错误'));
+    }
+  } catch (err) {
+    alert('重命名失败: ' + err.message);
+  }
+}
+
+async function createNewSession() {
+  try {
+    const data = await postJson('/api/sessions');
+    if (!data.success) {
+      alert('新建失败: ' + (data.error || '未知错误'));
+      return;
+    }
+    if (data.session) {
+      activeId = data.session.id;
+      connectToSession(activeId);
+    }
+    sessionListSig = '';
+    await fetchSessions();
+  } catch (err) {
+    alert('新建失败: ' + err.message);
+  }
+}
+
+async function closeSession(session) {
+  if (!confirm(`确定关闭 Tabby 里的终端 “${session.title}” 吗？里面运行的程序会被结束。`)) return;
+
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      if (activeId === session.id) {
+        activeId = null;
+      }
+      sessionListSig = '';
+      await fetchSessions();
+    } else {
+      alert('关闭失败: ' + (data.error || '未知错误'));
+    }
+  } catch (err) {
+    alert('关闭失败: ' + err.message);
+  }
+}
+
+function connectToSession(id) {
+  disconnectSocket();
 
   term.reset();
 
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const cols = term.cols || 120;
-  const rows = term.rows || 35;
-  const wsUrl = `${protocol}//${location.host}/ws/terminal?target=${encodeURIComponent(target)}&cols=${cols}&rows=${rows}`;
+  const wsUrl = `${protocol}//${location.host}/ws/terminal?session=${encodeURIComponent(id)}`;
 
   connectionBadgeEl.className = 'badge badge-disconnected';
   connectionBadgeEl.textContent = '● 连接中...';
 
   const socket = new WebSocket(wsUrl);
   currentSocket = socket;
+  nextReconnectAt = Date.now() + reconnectDelay;
 
   socket.onopen = () => {
     if (currentSocket !== socket) return;
     connectionBadgeEl.className = 'badge badge-connected';
     connectionBadgeEl.textContent = '● 已连接';
-    handleResize();
-    // 仅在桌面环境聚焦；触控移动设备不自动聚焦，避免切换 tab 时强制唤起手机输入法
+    // 仅在桌面环境聚焦；触控移动设备不自动聚焦，避免切换标签页时强制唤起手机输入法
     if (typeof window === 'undefined' || !window.matchMedia || !window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
       term.focus();
     }
@@ -535,11 +604,33 @@ function connectToWindow(target) {
 
   socket.onmessage = (event) => {
     if (currentSocket !== socket) return;
-    term.write(event.data);
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (msg.t === 'snapshot') {
+      reconnectDelay = 1000;
+      term.reset();
+      if (terminalContainerEl) {
+        terminalContainerEl.scrollLeft = 0;
+        terminalContainerEl.scrollTop = 0;
+      }
+      applyTerminalSize(msg.cols, msg.rows);
+      if (msg.data) term.write(msg.data, () => scheduleReveal(true));
+      else scheduleReveal(true);
+    } else if (msg.t === 'output') {
+      term.write(msg.data, () => scheduleReveal());
+    } else if (msg.t === 'size') {
+      applyTerminalSize(msg.cols, msg.rows);
+    }
   };
 
   socket.onclose = () => {
     if (currentSocket !== socket) return;
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+    nextReconnectAt = Date.now() + reconnectDelay;
     connectionBadgeEl.className = 'badge badge-disconnected';
     connectionBadgeEl.textContent = '● 已断开';
   };
@@ -552,48 +643,6 @@ function connectToWindow(target) {
   };
 }
 
-async function createNewWindow() {
-  const name = prompt('请输入新终端窗口名称:', `shell-${windowList.length + 1}`);
-  if (name === null) return;
-
-  try {
-    const res = await fetch('/api/windows', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name.trim() || undefined })
-    });
-    const data = await res.json();
-    if (data.success && data.window) {
-      activeTarget = data.window.target;
-      connectToWindow(activeTarget);
-      windowListSig = '';
-      await fetchWindows();
-    }
-  } catch (err) {
-    alert('创建窗口失败: ' + err.message);
-  }
-}
-
-async function closeWindow(target) {
-  if (!confirm(`确定关闭窗口 ${target} 吗？`)) return;
-
-  try {
-    const res = await fetch(`/api/windows/${encodeURIComponent(target)}`, {
-      method: 'DELETE'
-    });
-    const data = await res.json();
-    if (data.success) {
-      if (activeTarget === target) {
-        activeTarget = null;
-      }
-      windowListSig = '';
-      await fetchWindows();
-    }
-  } catch (err) {
-    alert('关闭窗口失败: ' + err.message);
-  }
-}
-
 function toggleFullscreen() {
   if (!document.fullscreenElement) {
     document.documentElement.requestFullscreen().catch(() => {});
@@ -602,7 +651,7 @@ function toggleFullscreen() {
   }
 }
 
-document.addEventListener('fullscreenchange', () => {
+function onFullscreenChange() {
   const isFs = !!document.fullscreenElement;
   btnFullscreen.textContent = isFs ? '✕ 退出全屏' : '⛶ 全屏模式';
   if (isFs) {
@@ -610,56 +659,34 @@ document.addEventListener('fullscreenchange', () => {
   } else {
     appRootEl.classList.remove('is-fullscreen');
   }
-  setTimeout(handleResize, 150);
-});
+  fitToScreen = isFs;
+  handleResize();
+  setTimeout(handleResize, 150); // 全屏后窗口尺寸要稍后才稳定
+}
+
+document.addEventListener('fullscreenchange', onFullscreenChange);
+
+function changeFontSize(delta) {
+  if (fitToScreen) {
+    // 手动调字号：以当前自动选出的字号为起点，之后不再自动适应
+    fitToScreen = false;
+    if (term && Number(term.options.fontSize)) baseFontSize = Number(term.options.fontSize);
+  }
+  baseFontSize = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, baseFontSize + delta));
+  handleResize();
+}
+
+function refreshNow() {
+  sessionListSig = '';
+  nextReconnectAt = 0;
+  fetchSessions();
+}
 
 btnFullscreen.addEventListener('click', toggleFullscreen);
-
-btnFontDec.addEventListener('click', () => {
-  currentFontSize = Math.max(10, currentFontSize - 1);
-  if (term && fitAddon) {
-    term.options.fontSize = currentFontSize;
-    handleResize();
-  }
-});
-
-btnFontInc.addEventListener('click', () => {
-  currentFontSize = Math.min(26, currentFontSize + 1);
-  if (term && fitAddon) {
-    term.options.fontSize = currentFontSize;
-    handleResize();
-  }
-});
-
-btnExternalShells.addEventListener('click', () => {
-  externalModalEl.classList.remove('hidden');
-});
-
-btnCloseModal.addEventListener('click', () => {
-  externalModalEl.classList.add('hidden');
-});
-
-externalModalEl.addEventListener('click', (e) => {
-  if (e.target === externalModalEl) {
-    externalModalEl.classList.add('hidden');
-  }
-});
-
-btnCopyJoin.addEventListener('click', () => {
-  navigator.clipboard.writeText('wsl-term').then(() => {
-    btnCopyJoin.textContent = '✓ 已复制';
-    setTimeout(() => {
-      btnCopyJoin.textContent = '📋 复制';
-    }, 1500);
-  });
-});
-
-btnNewWindow.addEventListener('click', createNewWindow);
-btnRefresh.addEventListener('click', () => {
-  windowListSig = '';
-  systemShellsSig = '';
-  fetchWindows();
-});
+btnFontDec.addEventListener('click', () => changeFontSize(-1));
+btnFontInc.addEventListener('click', () => changeFontSize(1));
+btnNewWindow.addEventListener('click', createNewSession);
+btnRefresh.addEventListener('click', refreshNow);
 
 const keyMap = {
   ESC: '\x1b',
@@ -677,9 +704,7 @@ const keyMap = {
 };
 
 function sendTerminalData(data) {
-  if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
-    currentSocket.send(data);
-  }
+  sendInput(data);
   // 注意：不要在此处调用 term.focus()！
   // 移动端在 xterm 隐藏 textarea 上调用 .focus() 会强制弹起手机原生软键盘。
   // 用户点击虚拟控制按键仅发送 ANSI 控制字符，不得触发软键盘弹出。
@@ -770,71 +795,30 @@ function closeMobileDrawer() {
 }
 
 function initMobileMenu() {
-  if (btnMobileMenu && btnMobileMenu.addEventListener) {
-    btnMobileMenu.addEventListener('click', openMobileDrawer);
-  }
-  if (btnCloseDrawer && btnCloseDrawer.addEventListener) {
-    btnCloseDrawer.addEventListener('click', closeMobileDrawer);
-  }
-  if (mobileMenuBackdropEl && mobileMenuBackdropEl.addEventListener) {
-    mobileMenuBackdropEl.addEventListener('click', closeMobileDrawer);
-  }
-
-  if (btnDrawerFontDec && btnDrawerFontDec.addEventListener) {
-    btnDrawerFontDec.addEventListener('click', () => {
-      currentFontSize = Math.max(10, currentFontSize - 1);
-      if (term && fitAddon) {
-        term.options.fontSize = currentFontSize;
-        handleResize();
-      }
-    });
-  }
-
-  if (btnDrawerFontInc && btnDrawerFontInc.addEventListener) {
-    btnDrawerFontInc.addEventListener('click', () => {
-      currentFontSize = Math.min(26, currentFontSize + 1);
-      if (term && fitAddon) {
-        term.options.fontSize = currentFontSize;
-        handleResize();
-      }
-    });
-  }
-
-  if (btnDrawerFullscreen && btnDrawerFullscreen.addEventListener) {
-    btnDrawerFullscreen.addEventListener('click', () => {
-      closeMobileDrawer();
-      toggleFullscreen();
-    });
-  }
-
-  if (btnDrawerRefresh && btnDrawerRefresh.addEventListener) {
-    btnDrawerRefresh.addEventListener('click', () => {
-      closeMobileDrawer();
-      windowListSig = '';
-      systemShellsSig = '';
-      fetchWindows();
-    });
-  }
-
-  if (btnDrawerToggleKeys && btnDrawerToggleKeys.addEventListener) {
-    btnDrawerToggleKeys.addEventListener('click', () => {
-      closeMobileDrawer();
-      toggleAccessoryBar();
-    });
-  }
-
-  if (btnDrawerExternalShells && btnDrawerExternalShells.addEventListener) {
-    btnDrawerExternalShells.addEventListener('click', () => {
-      closeMobileDrawer();
-      if (externalModalEl && externalModalEl.classList) {
-        externalModalEl.classList.remove('hidden');
-      }
-    });
-  }
+  const on = (el, handler) => {
+    if (el && el.addEventListener) el.addEventListener('click', handler);
+  };
+  on(btnMobileMenu, openMobileDrawer);
+  on(btnCloseDrawer, closeMobileDrawer);
+  on(mobileMenuBackdropEl, closeMobileDrawer);
+  on(btnDrawerFontDec, () => changeFontSize(-1));
+  on(btnDrawerFontInc, () => changeFontSize(1));
+  on(btnDrawerFullscreen, () => {
+    closeMobileDrawer();
+    toggleFullscreen();
+  });
+  on(btnDrawerRefresh, () => {
+    closeMobileDrawer();
+    refreshNow();
+  });
+  on(btnDrawerToggleKeys, () => {
+    closeMobileDrawer();
+    toggleAccessoryBar();
+  });
 }
 
 initTerminal();
 initAccessoryBar();
 initMobileMenu();
-fetchWindows();
-setInterval(fetchWindows, 1000);
+fetchSessions();
+setInterval(fetchSessions, 1000);

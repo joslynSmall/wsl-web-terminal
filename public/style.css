@@ -73,6 +73,8 @@ html, body {
 .badge {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
   padding: 2px 8px;
   font-size: 11px;
   border-radius: 12px;
@@ -91,18 +93,6 @@ html, body {
   border: 1px solid rgba(243, 139, 168, 0.3);
 }
 
-.badge-system {
-  background-color: rgba(137, 180, 250, 0.15);
-  color: var(--primary);
-  border: 1px solid rgba(137, 180, 250, 0.3);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.badge-system:hover {
-  background-color: rgba(137, 180, 250, 0.25);
-}
-
 .actions {
   display: flex;
   align-items: center;
@@ -112,6 +102,8 @@ html, body {
 .btn {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
   gap: 5px;
   padding: 4px 10px;
   border-radius: 5px;
@@ -243,20 +235,29 @@ html, body {
 .terminal-container {
   width: 100%;
   height: 100%;
+  overflow: auto;
+  /* 终端比窗口大时由这个容器滚动，所以显示它自己的滚动条，让人看得出还有内容在视野外 */
+  scrollbar-width: auto;
+  scrollbar-color: #585b70 var(--bg-dark);
   padding: 0;
   margin: 0;
   touch-action: none;
 }
 
+/* 终端按 Tabby 的列数×行数撑开，比可视区大时由 .terminal-container 滚动；比可视区小时铺满 */
 .terminal-container .xterm {
-  width: 100%;
-  height: 100%;
+  width: max-content;
+  min-width: 100%;
+  height: auto;
+  min-height: 100%;
   padding: 0;
   touch-action: none;
 }
 
 .terminal-container .xterm-viewport {
   -webkit-overflow-scrolling: touch;
+  /* 终端尺寸跟随 Tabby，可能小于可视区，空白处要和主题底色一致 */
+  background-color: var(--bg-dark) !important;
 }
 
 .status-bar {
@@ -294,53 +295,6 @@ html, body {
   min-height: 30px;
 }
 
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  transition: opacity 0.2s;
-}
-
-.modal-overlay.hidden {
-  display: none;
-}
-
-.modal-card {
-  width: 680px;
-  max-width: 92vw;
-  max-height: 85vh;
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
-  background-color: var(--bg-card);
-}
-
-.modal-title {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--primary);
-}
-
 .btn-close {
   background: none;
   border: none;
@@ -352,141 +306,6 @@ html, body {
 
 .btn-close:hover {
   color: #fff;
-}
-
-.modal-body {
-  padding: 16px 18px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.modal-tip {
-  color: var(--text-main);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.code-box {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background-color: var(--bg-dark);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--success);
-}
-
-.code-box code {
-  user-select: all;
-  overflow-x: auto;
-}
-
-.external-list-header {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-top: 4px;
-}
-
-.external-shells-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 340px;
-  overflow-y: auto;
-}
-
-.shell-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background-color: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 14px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  cursor: pointer;
-  transition: all 0.15s ease-in-out;
-}
-
-.shell-card:hover {
-  border-color: var(--primary);
-  background-color: var(--bg-tab);
-  transform: translateY(-1px);
-}
-
-.shell-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  overflow: hidden;
-}
-
-.shell-title {
-  color: var(--text-main);
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.shell-path {
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.shell-cmd-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.shell-cmd-label {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.shell-cmd-text {
-  font-size: 11px;
-  color: var(--primary);
-  background: rgba(137, 180, 250, 0.12);
-  padding: 1px 6px;
-  border-radius: 3px;
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shell-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.shell-status-badge {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-}
-
-.shell-status-managed {
-  background: rgba(166, 227, 161, 0.15);
-  color: var(--success);
-}
-
-.shell-status-external {
-  background: rgba(137, 180, 250, 0.15);
-  color: var(--primary);
 }
 
 /* ==========================================================================
@@ -543,6 +362,8 @@ html, body {
 
 .acc-btn {
   display: inline-flex;
+  flex-shrink: 0;
+  white-space: nowrap;
   align-items: center;
   justify-content: center;
   height: 28px;
@@ -747,16 +568,17 @@ html, body {
     min-height: 42px;
   }
 
+  /* 手机顶栏空间有限：隐藏标题文字，按键栏开关在抽屉菜单里 */
   .brand-title {
-    font-size: 12px;
+    display: none;
   }
 
   /* 隐藏桌面专属按钮，展示汉堡菜单 */
+  #btn-toggle-keys,
   #btn-fullscreen,
   #btn-font-dec,
   #btn-font-inc,
-  #btn-refresh,
-  #btn-external-shells {
+  #btn-refresh {
     display: none !important;
   }
 
@@ -810,21 +632,6 @@ html, body {
     white-space: nowrap;
   }
 
-  /* 模态框移动端适配 */
-  .modal-card {
-    width: 95vw;
-    max-height: 90vh;
-  }
-
-  .shell-card {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .shell-actions {
-    justify-content: flex-end;
-  }
 }
 
 @media (max-width: 480px) {
@@ -848,3 +655,40 @@ html, body {
   }
 }
 
+
+/* ==========================================================================
+   空状态 (没有 Bridge / 没有终端标签页时的提示)
+   ========================================================================== */
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  line-height: 1.6;
+  font-size: 14px;
+  color: var(--text-muted);
+  background-color: var(--bg-dark);
+  z-index: 5;
+}
+
+.empty-state.hidden {
+  display: none;
+}
+
+/* 只隐藏 xterm 自带的滚动条(它按整个终端高度绘制，终端比窗口高时位置和比例都不对)；容器自己的滚动条保留 */
+.terminal-container .xterm-viewport::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.terminal-container .xterm-viewport {
+  scrollbar-width: none;
+}
+
+.terminal-container .xterm .scrollbar {
+  display: none !important;
+}

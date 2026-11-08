@@ -1,4 +1,5 @@
 node_modules/
+.omo/
 *.log
 .env
 .DS_Store

@@ -10,7 +10,7 @@
   <meta name="format-detection" content="telephone=no">
   <title>WSL Web Terminal Hub</title>
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
-  <link rel="stylesheet" href="/style.css?v=6">
+  <link rel="stylesheet" href="/style.css?v=11">
 </head>
 <body>
   <div id="app-root" class="app-layout">
@@ -19,7 +19,6 @@
         <span class="brand-icon">⚡</span>
         <span class="brand-title">WSL Terminal Hub</span>
         <span id="connection-badge" class="badge badge-disconnected">● 未连接</span>
-        <button type="button" id="btn-external-shells" class="badge badge-system" title="查看所有检测到的外部 Shell 窗口">🔍 外部终端: <span id="external-count">0</span></button>
       </div>
       <div class="actions">
         <button type="button" id="btn-toggle-keys" class="btn btn-secondary" title="显示或隐藏底部虚拟按键">⌨️ 按键</button>
@@ -58,18 +57,16 @@
 
     <main id="terminal-wrapper" class="terminal-wrapper">
       <div id="terminal-container" class="terminal-container"></div>
+      <div id="empty-state" class="empty-state">正在连接服务…</div>
     </main>
 
     <footer class="status-bar">
       <div class="status-left">
         <span id="status-target">窗口: -</span>
         <span class="sep">|</span>
-        <span id="status-command">命令: -</span>
+        <span id="status-window">Tabby 窗口: -</span>
         <span class="sep">|</span>
         <span id="status-dim">尺寸: -</span>
-      </div>
-      <div class="status-right">
-        <span id="status-path">工作目录: -</span>
       </div>
     </footer>
   </div>
@@ -93,34 +90,14 @@
           <button type="button" id="btn-drawer-toggle-keys" class="btn btn-secondary">⌨️ 切换虚拟按键栏</button>
           <button type="button" id="btn-drawer-fullscreen" class="btn btn-secondary">⛶ 切换全屏模式</button>
           <button type="button" id="btn-drawer-refresh" class="btn btn-secondary">🔄 刷新窗口列表</button>
-          <button type="button" id="btn-drawer-external-shells" class="btn btn-secondary">🔍 外部 Shell 窗口 (<span id="drawer-external-count">0</span>)</button>
         </div>
       </div>
     </div>
   </div>
   <div id="mobile-menu-backdrop" class="drawer-backdrop hidden"></div>
 
-  <div id="external-modal" class="modal-overlay hidden">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title">🔍 检测到的外部 Linux Shell 窗口</div>
-        <button type="button" id="btn-close-modal" class="btn-close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p class="modal-tip">检测到底层 WSL 运行中的独立 Shell 终端。在目标终端中输入下方命令即可将其无缝接入 Web 页面：</p>
-        <div class="code-box">
-          <code id="join-cmd-text">wsl-term</code>
-          <button type="button" id="btn-copy-join" class="btn btn-secondary">📋 复制</button>
-        </div>
-        <div class="external-list-header">活跃外部终端列表（点击直接在 Web 端打开使用）：</div>
-        <div id="external-shells-list" class="external-shells-list"></div>
-      </div>
-    </div>
-  </div>
-
   <script src="/vendor/xterm/lib/xterm.js"></script>
-  <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
   <script src="/vendor/addon-web-links/lib/addon-web-links.js"></script>
-  <script src="/app.js?v=6"></script>
+  <script src="/app.js?v=12"></script>
 </body>
 </html>
