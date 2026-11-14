@@ -12,6 +12,20 @@ const projectRoot = path.resolve(__dirname, '..');
 
 const HEARTBEAT_MS = 30000;
 
+/** IPv4 addresses another machine (or the Windows side of WSL) can use to reach this server. Loopback is omitted; the Bridge on the same side keeps ws://localhost. */
+export function reachableBridgeUrls(port, interfaces = os.networkInterfaces()) {
+  const urls = [];
+  for (const addrs of Object.values(interfaces || {})) {
+    for (const addr of addrs || []) {
+      const family = addr.family;
+      const ipv4 = family === 'IPv4' || family === 4;
+      if (!ipv4 || addr.internal) continue;
+      urls.push(`ws://${addr.address}:${port}`);
+    }
+  }
+  return urls;
+}
+
 /** Hosts we answer to: IP literals, localhost, this machine's name, plus ALLOWED_HOSTS (comma separated). Blocks DNS rebinding. */
 export function createHostCheck(extraHosts = process.env.ALLOWED_HOSTS || '') {
   const allowed = new Set(
@@ -79,14 +93,29 @@ export function createServer({ hub = new SessionHub({ log: (m) => console.log(m)
 
   app.get('/api/sessions', handle(() => hub.list()));
 
-  app.post('/api/sessions', async (_req, res) => {
+  app.post('/api/sessions', async (req, res) => {
     try {
-      const session = await hub.createSession();
+      const session = await hub.createSession({
+        environment: req.body?.environment,
+        cwd: req.body?.cwd
+      });
       res.status(201).json({ success: true, session });
     } catch (err) {
       res.status(err instanceof HubError ? err.status : 500).json({ success: false, error: err.message });
     }
   });
+
+  // Directory listing for the page's directory picker. The Bridge reads the filesystem.
+  app.get('/api/directories', handle(async (req) => {
+    const listing = await hub.listDirectory(String(req.query.path || ''));
+    return { listing };
+  }));
+
+  // Whether a remembered directory is still there, so the page can drop the stale ones.
+  app.get('/api/directories/exists', handle(async (req) => {
+    const exists = await hub.checkDirectory(String(req.query.path || ''));
+    return { exists };
+  }));
 
   app.post('/api/sessions/:id/rename', handle(async (req) => {
     await hub.renameSession(req.params.id, req.body?.name);
@@ -184,6 +213,14 @@ if (isMain) {
     console.log('WSL Web Terminal Server is running (Tabby mirror)');
     console.log(`URL: http://localhost:${PORT}   Bridge endpoint: ws://localhost:${PORT}/ws/bridge`);
     console.log(`Listening on ${HOST}; there is no authentication.`);
+    const urls = reachableBridgeUrls(PORT);
+    console.log(`同一侧的 Tabby 继续用 ws://localhost:${PORT}。`);
+    if (urls.length) {
+      console.log('另一侧的 Tabby 把 wslWebBridge.serverUrl 设成下面任一地址：');
+      for (const url of urls) console.log(`  ${url}`);
+    } else {
+      console.log(`没有非回环地址。另一侧的 Tabby 请仍用 ws://localhost:${PORT}。`);
+    }
     console.log('=======================================================');
   });
 }

@@ -1,6 +1,6 @@
 {
   "name": "tabby-wsl-web-bridge",
-  "version": "0.1.2",
+  "version": "0.2.1",
   "description": "Tabby plugin: mirrors your terminal panes to the wsl-web-terminal web UI",
   "keywords": [
     "tabby-plugin"

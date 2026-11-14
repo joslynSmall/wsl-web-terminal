@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import test from 'node:test';
 import WebSocket from 'ws';
-import { createServer, createHostCheck } from '../src/server.js';
+import { createServer, createHostCheck, reachableBridgeUrls } from '../src/server.js';
 import { SessionHub } from '../src/session-hub.js';
 
 async function start(t, { heartbeatMs } = {}) {
@@ -69,7 +69,8 @@ test('a browser sees what the Bridge reports, gets the screen first, then live o
 
   const list = await s.request('/api/sessions');
   assert.equal(list.status, 200);
-  assert.deepEqual(list.json.sessions, [{ id: 'b.1', title: 'PowerShell', cols: 100, rows: 30, windowNo: 1 }]);
+  assert.deepEqual(list.json.sessions, [{ id: 'b.1', title: 'PowerShell', cols: 100, rows: 30, windowNo: 1, origin: '', environment: '' }]);
+  assert.equal(list.json.showOrigin, false);
   assert.equal(list.json.bridges, 1);
 
   const browser = await s.connect('/ws/terminal?session=b.1');
@@ -98,8 +99,8 @@ test('creating, renaming and closing go through the Bridge', async (t) => {
   const bridge = await connectBridge(s);
 
   const created = s.request('/api/sessions', { method: 'POST' });
-  await s.until(() => bridge.messages.some((m) => m.type === 'create'), 'create command');
-  const create = bridge.messages.find((m) => m.type === 'create');
+  await s.until(() => bridge.messages.some((m) => m.type === 'create-in'), 'create command');
+  const create = bridge.messages.find((m) => m.type === 'create-in');
   bridge.send(JSON.stringify({ type: 'sessions', sessions: [
     { id: 'b.1', title: 'PowerShell', cols: 100, rows: 30 },
     { id: 'b.2', title: 'New tab', cols: 100, rows: 30 }
@@ -219,4 +220,17 @@ test('heartbeat keeps healthy connections open and drops the ones that stop answ
   assert.equal(bridge.readyState, WebSocket.OPEN, 'a Bridge that answers pings must stay connected');
   assert.equal(browser.readyState, WebSocket.OPEN);
   assert.equal(s.hub.list().bridges, 1);
+});
+
+test('MIRROR-B06 the addresses offered to the other side are the non-loopback IPv4 ones', () => {
+  const urls = reachableBridgeUrls(7890, {
+    lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true }],
+    eth0: [{ address: '192.168.15.188', family: 'IPv4', internal: false }],
+    eth1: [
+      { address: 'fe80::1', family: 'IPv6', internal: false },
+      { address: '192.168.77.1', family: 4, internal: false }
+    ]
+  });
+  assert.deepEqual(urls, ['ws://192.168.15.188:7890', 'ws://192.168.77.1:7890']);
+  assert.deepEqual(reachableBridgeUrls(7890, { lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true }] }), []);
 });

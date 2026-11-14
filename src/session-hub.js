@@ -3,6 +3,12 @@ import { randomUUID } from 'node:crypto';
 const MAX_INPUT_LENGTH = 64 * 1024;
 const MAX_TITLE_LENGTH = 200;
 const MAX_DIMENSION = 1000;
+const ORIGINS = new Set(['Windows', 'WSL']);
+
+/** Only the two systems this app distinguishes. Anything else, including a missing field, is "not reported". */
+export function normalizeOrigin(value) {
+  return ORIGINS.has(value) ? value : '';
+}
 
 export class HubError extends Error {
   constructor(message, status = 500) {
@@ -57,7 +63,12 @@ export class SessionHub {
         if (msg.type === 'hello') {
           if (bridge) return;
           if (typeof msg.bridgeId !== 'string' || !msg.bridgeId) return;
-          bridge = this.#registerBridge(channel, msg.bridgeId, typeof msg.version === 'string' ? msg.version.slice(0, 40) : 'unknown');
+          bridge = this.#registerBridge(
+            channel,
+            msg.bridgeId,
+            typeof msg.version === 'string' ? msg.version.slice(0, 40) : 'unknown',
+            normalizeOrigin(msg.origin)
+          );
           return;
         }
         if (bridge) this.#onBridgeMessage(bridge, msg);
@@ -68,7 +79,7 @@ export class SessionHub {
     };
   }
 
-  #registerBridge(channel, id, version) {
+  #registerBridge(channel, id, version, origin) {
     const existing = this.bridges.get(id);
     if (existing) {
       this.#dropBridge(existing, existing.channel);
@@ -78,6 +89,7 @@ export class SessionHub {
       id,
       no: this.nextBridgeNo++,
       version,
+      origin,
       channel,
       focusedAt: this.now(),
       sessionIds: [],
@@ -85,7 +97,7 @@ export class SessionHub {
       newSessionWaiters: new Set()
     };
     this.bridges.set(id, bridge);
-    this.log(`[bridge] W${bridge.no} connected (${id}) version ${version}`);
+    this.log(`[bridge] W${bridge.no} connected (${id}) version ${version} origin ${origin || 'unknown'}`);
     return bridge;
   }
 
@@ -152,11 +164,14 @@ export class SessionHub {
       const existing = this.sessions.get(item.id);
       if (existing && existing.bridge !== bridge) return; // ids are unique per Bridge
       const title = String(item.title ?? '').slice(0, MAX_TITLE_LENGTH);
+      // The environment is the system the terminal itself runs in, which is not the same thing
+      // as the Bridge's origin (the system Tabby runs on).
+      const environment = item.environment === 'WSL' ? 'WSL' : item.environment === 'Windows' ? 'Windows' : '';
       if (existing) {
         const cols = clampDimension(item.cols, existing.cols);
         const rows = clampDimension(item.rows, existing.rows);
         const resized = cols !== existing.cols || rows !== existing.rows;
-        Object.assign(existing, { title, cols, rows, order, focused: item.focused === true });
+        Object.assign(existing, { title, cols, rows, order, environment, focused: item.focused === true });
         if (resized) {
           for (const viewer of existing.viewers) {
             if (!viewer.pending) sendJson(viewer.channel, { t: 'size', cols, rows });
@@ -170,6 +185,7 @@ export class SessionHub {
           cols: clampDimension(item.cols, 80),
           rows: clampDimension(item.rows, 24),
           order,
+          environment,
           focused: item.focused === true,
           viewers: new Set()
         });
@@ -202,8 +218,9 @@ export class SessionHub {
   list() {
     const sessions = [...this.sessions.values()]
       .sort((a, b) => a.bridge.no - b.bridge.no || a.order - b.order)
-      .map((s) => ({ id: s.id, title: s.title, cols: s.cols, rows: s.rows, windowNo: s.bridge.no }));
-    return { bridges: this.bridges.size, sessions, focusedId: this.#focusedSessionId() };
+      .map((s) => ({ id: s.id, title: s.title, cols: s.cols, rows: s.rows, windowNo: s.bridge.no, origin: s.bridge.origin, environment: s.environment }));
+    const origins = new Set([...this.bridges.values()].map((b) => b.origin));
+    return { bridges: this.bridges.size, sessions, focusedId: this.#focusedSessionId(), showOrigin: origins.size > 1 };
   }
 
   /** The session that has focus in the Tabby window focused most recently, or null if none reports focus. */
@@ -234,6 +251,14 @@ export class SessionHub {
         const msg = parseJson(raw);
         if (msg && msg.t === 'input' && typeof msg.data === 'string' && msg.data.length <= MAX_INPUT_LENGTH) {
           this.#sendToBridge(session.bridge, { type: 'input', id: session.id, data: msg.data });
+        } else if (msg && msg.t === 'resize') {
+          // The page fills its screen at a normal font size, so the pane takes the browser's size while
+          // someone is watching. With several browsers the last one to report wins.
+          const cols = clampDimension(msg.cols, 0);
+          const rows = clampDimension(msg.rows, 0);
+          if (cols && rows && this.sessions.get(session.id) === session) {
+            this.#sendToBridge(session.bridge, { type: 'resize', id: session.id, cols, rows });
+          }
         }
       },
       onClose: () => this.#removeViewer(session, viewer)
@@ -309,13 +334,20 @@ export class SessionHub {
 
   // --------------------------------------------------------------- commands
 
-  /** Opens a new tab in the Tabby window that was focused most recently. */
-  async createSession() {
+  /**
+   * Opens a new tab in the Tabby window that was focused most recently.
+   *
+   * `environment` picks what the new terminal runs: 'Windows' for a plain Windows shell,
+   * 'WSL' for a wsl.exe pane. `cwd` is the working directory to start it in, in the flavour of
+   * the chosen environment (a Windows path for 'Windows', a Linux path for 'WSL').
+   */
+  async createSession({ environment = 'Windows', cwd = '' } = {}) {
     const bridge = [...this.bridges.values()].sort((a, b) => b.focusedAt - a.focusedAt)[0];
     if (!bridge) throw new HubError('No Tabby window is connected', 503);
     const waiter = this.#waitForNewSession(bridge);
+    const command = { type: 'create-in', environment, cwd };
     try {
-      await this.#runCommand(bridge, { type: 'create' });
+      await this.#runCommand(bridge, command);
     } catch (err) {
       waiter.cancel();
       throw err;
@@ -323,8 +355,30 @@ export class SessionHub {
     const id = await waiter.promise;
     const session = id ? this.sessions.get(id) : null;
     return session
-      ? { id: session.id, title: session.title, cols: session.cols, rows: session.rows, windowNo: bridge.no }
+      ? { id: session.id, title: session.title, cols: session.cols, rows: session.rows, windowNo: bridge.no, environment: session.environment }
       : null;
+  }
+
+  /**
+   * Lists a directory for the page's directory picker. The Bridge does the reading: it runs
+   * inside Tabby and is the only side that can see WSL directories.
+   */
+  async listDirectory(path) {
+    const bridge = [...this.bridges.values()].sort((a, b) => b.focusedAt - a.focusedAt)[0];
+    if (!bridge) throw new HubError('No Tabby window is connected', 503);
+    const result = await this.#runCommand(bridge, { type: 'list-dirs', path });
+    return result.result || null;
+  }
+
+  /**
+   * Checks whether a remembered directory still exists. A directory can be deleted after the page
+   * remembered it, and a shell started in a missing directory would quietly land somewhere else.
+   */
+  async checkDirectory(path) {
+    const bridge = [...this.bridges.values()].sort((a, b) => b.focusedAt - a.focusedAt)[0];
+    if (!bridge) throw new HubError('No Tabby window is connected', 503);
+    const result = await this.#runCommand(bridge, { type: 'check-dir', path });
+    return !!(result.result && result.result.exists);
   }
 
   #waitForNewSession(bridge) {
@@ -364,7 +418,9 @@ export class SessionHub {
       bridge.commands.set(reqId, {
         timer,
         reject,
-        resolve: (result) => (result.ok ? resolve(result) : reject(new HubError(result.error || 'Tabby refused the request', 502)))
+        resolve: (result) => (result.ok
+          ? resolve(result)
+          : reject(new HubError(result.error || 'Tabby refused the request', 502)))
       });
       this.#sendToBridge(bridge, { ...command, reqId });
     });

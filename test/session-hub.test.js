@@ -16,10 +16,12 @@ function channel() {
   return ch;
 }
 
-function connectBridge(hub, bridgeId, sessions = []) {
+function connectBridge(hub, bridgeId, sessions = [], origin) {
   const ch = channel();
   const handle = hub.addBridge(ch);
-  handle.onMessage(JSON.stringify({ type: 'hello', bridgeId }));
+  const hello = { type: 'hello', bridgeId };
+  if (origin !== undefined) hello.origin = origin;
+  handle.onMessage(JSON.stringify(hello));
   if (sessions.length) handle.onMessage(JSON.stringify({ type: 'sessions', sessions }));
   const send = (message) => handle.onMessage(JSON.stringify(message));
   return { ch, handle, send };
@@ -43,7 +45,7 @@ test('messages before hello are ignored and malformed input never throws', () =>
   handle.onMessage('not json');
   handle.onMessage('null');
   handle.onMessage(JSON.stringify({ type: 'hello' }));
-  assert.deepEqual(hub.list(), { bridges: 0, sessions: [], focusedId: null });
+  assert.deepEqual(hub.list(), { bridges: 0, sessions: [], focusedId: null, showOrigin: false });
 });
 
 test('list() names the session that has focus in the most recently focused Tabby window', () => {
@@ -162,7 +164,7 @@ test('closing a session in Tabby closes its viewers; losing the Bridge removes e
 
   bridge.handle.onClose();
   assert.equal(v2.closed.code, 4410);
-  assert.deepEqual(hub.list(), { bridges: 0, sessions: [], focusedId: null });
+  assert.deepEqual(hub.list(), { bridges: 0, sessions: [], focusedId: null, showOrigin: false });
 });
 
 test('a slow viewer is caught up with a fresh snapshot instead of being buffered without limit', () => {
@@ -218,9 +220,11 @@ test('creating a session targets the most recently focused window and returns th
   a.send({ type: 'focus' });
 
   const creating = hub.createSession();
-  const command = a.ch.last('create');
+  const command = a.ch.last('create-in');
   assert.ok(command, 'window A was focused last');
-  assert.equal(b.ch.last('create'), undefined);
+  assert.equal(b.ch.last('create-in'), undefined);
+  assert.equal(command.environment, 'Windows');
+  assert.equal(command.cwd, '');
   a.send({ type: 'sessions', sessions: [tab('a.1'), tab('a.2', 'fresh')] });
   a.send({ type: 'result', reqId: command.reqId, ok: true });
   const created = await creating;
@@ -268,4 +272,153 @@ test('the Bridge version from hello is logged so a stale plugin is easy to spot'
   const old = channel();
   hub.addBridge(old).onMessage(JSON.stringify({ type: 'hello', bridgeId: 'y' }));
   assert.match(lines[1], /version unknown/, 'an older Bridge that does not report a version');
+});
+
+test('MIRROR-B01 one origin does not ask the page to show it, even across two windows', () => {
+  const hub = new SessionHub();
+  connectBridge(hub, 'a', [tab('a.1', 'one')], 'Windows');
+  connectBridge(hub, 'b', [tab('b.1', 'two')], 'Windows');
+  const list = hub.list();
+  assert.equal(list.showOrigin, false);
+  assert.deepEqual(list.sessions.map((s) => s.origin), ['Windows', 'Windows']);
+});
+
+test('MIRROR-B02 a second origin is listed on every session and the page is told to show it', () => {
+  const hub = new SessionHub();
+  connectBridge(hub, 'win', [tab('win.1')], 'Windows');
+  connectBridge(hub, 'wsl', [tab('wsl.1')], 'WSL');
+  const list = hub.list();
+  assert.equal(list.showOrigin, true);
+  assert.deepEqual(list.sessions.map((s) => [s.id, s.origin]), [['win.1', 'Windows'], ['wsl.1', 'WSL']]);
+});
+
+test('MIRROR-B03 a Bridge that reports no origin, or an unrecognised one, is listed with an empty origin', () => {
+  const hub = new SessionHub();
+  connectBridge(hub, 'old', [tab('old.1')]);
+  connectBridge(hub, 'odd', [tab('odd.1')], 'linux');
+  connectBridge(hub, 'wsl', [tab('wsl.1')], 'WSL');
+  const list = hub.list();
+  assert.equal(list.showOrigin, true);
+  assert.equal(list.sessions.find((s) => s.id === 'old.1').origin, '');
+  assert.equal(list.sessions.find((s) => s.id === 'odd.1').origin, '');
+  assert.equal(list.sessions.find((s) => s.id === 'wsl.1').origin, 'WSL');
+});
+
+test('MIRROR-B04 dropping one origin removes only its sessions and hides the origin label', () => {
+  const hub = new SessionHub();
+  const win = connectBridge(hub, 'win', [tab('win.1')], 'Windows');
+  connectBridge(hub, 'wsl', [tab('wsl.1')], 'WSL');
+  assert.equal(hub.list().showOrigin, true);
+  win.handle.onClose();
+  const list = hub.list();
+  assert.deepEqual(list.sessions.map((s) => s.id), ['wsl.1']);
+  assert.equal(list.showOrigin, false);
+});
+
+test('MIRROR-B05 creating a session still targets the most recently focused Bridge when origins differ', async () => {
+  let clock = 0;
+  const hub = new SessionHub({ now: () => ++clock });
+  const win = connectBridge(hub, 'win', [tab('win.1')], 'Windows');
+  const wsl = connectBridge(hub, 'wsl', [tab('wsl.1')], 'WSL');
+  wsl.send({ type: 'focus' });
+  const creating = hub.createSession();
+  const command = wsl.ch.last('create-in');
+  assert.ok(command);
+  assert.equal(win.ch.last('create-in'), undefined);
+  wsl.send({ type: 'sessions', sessions: [tab('wsl.1'), tab('wsl.2', 'fresh')] });
+  wsl.send({ type: 'result', reqId: command.reqId, ok: true });
+  assert.equal((await creating).id, 'wsl.2');
+});
+
+test('MIRROR-B07 a viewer resize is forwarded to the owning Bridge; invalid sizes are dropped', () => {
+  const hub = new SessionHub();
+  const bridge = connectBridge(hub, 'b1', [tab('b1.1')]);
+  const viewer = hub.addViewer('b1.1', channel());
+  viewer.onMessage(JSON.stringify({ t: 'resize', cols: 200, rows: 52 }));
+  viewer.onMessage(JSON.stringify({ t: 'resize', cols: 0, rows: 52 }));
+  viewer.onMessage(JSON.stringify({ t: 'resize', cols: 'x', rows: 52 }));
+  viewer.onMessage(JSON.stringify({ t: 'resize', cols: 5000, rows: 52 }));
+  assert.deepEqual(bridge.ch.sent.filter((m) => m.type === 'resize'), [{ type: 'resize', id: 'b1.1', cols: 200, rows: 52 }]);
+});
+
+test('MIRROR-B10 with two viewers on one pane every resize is forwarded, so the last one wins', () => {
+  const hub = new SessionHub();
+  const bridge = connectBridge(hub, 'b1', [tab('b1.1')]);
+  const desktop = hub.addViewer('b1.1', channel());
+  const phone = hub.addViewer('b1.1', channel());
+  desktop.onMessage(JSON.stringify({ t: 'resize', cols: 200, rows: 52 }));
+  phone.onMessage(JSON.stringify({ t: 'resize', cols: 51, rows: 45 }));
+  assert.deepEqual(bridge.ch.last('resize'), { type: 'resize', id: 'b1.1', cols: 51, rows: 45 });
+});
+
+test('MIRROR-B08 the Bridge is told to stop watching only when the last viewer of a pane leaves', () => {
+  const hub = new SessionHub();
+  const bridge = connectBridge(hub, 'b1', [tab('b1.1')]);
+  const a = hub.addViewer('b1.1', channel());
+  const b = hub.addViewer('b1.1', channel());
+  a.onClose();
+  assert.equal(bridge.ch.sent.filter((m) => m.type === 'watch' && m.on === false).length, 0);
+  b.onClose();
+  assert.deepEqual(bridge.ch.last('watch'), { type: 'watch', id: 'b1.1', on: false });
+});
+
+test('MIRROR-B12 creating a Windows terminal forwards the environment and working directory', async () => {
+  const hub = new SessionHub();
+  const bridge = connectBridge(hub, 'b1', [tab('b1.1')]);
+  const creating = hub.createSession({ environment: 'Windows', cwd: 'C:\\Users\\joslyn\\code' });
+  const command = bridge.ch.last('create-in');
+  assert.equal(command.environment, 'Windows');
+  assert.equal(command.cwd, 'C:\\Users\\joslyn\\code');
+  bridge.send({ type: 'sessions', sessions: [tab('b1.1'), tab('b1.2', 'fresh')] });
+  bridge.send({ type: 'result', reqId: command.reqId, ok: true });
+  assert.equal((await creating).id, 'b1.2');
+});
+
+test('MIRROR-B13 creating a WSL terminal forwards the environment and the Linux working directory', async () => {
+  const hub = new SessionHub();
+  const bridge = connectBridge(hub, 'b1', [tab('b1.1')]);
+  const creating = hub.createSession({ environment: 'WSL', cwd: '/home/joslyn/code' });
+  const command = bridge.ch.last('create-in');
+  assert.equal(command.environment, 'WSL');
+  assert.equal(command.cwd, '/home/joslyn/code');
+  bridge.send({ type: 'sessions', sessions: [tab('b1.1'), tab('b1.2', 'fresh')] });
+  bridge.send({ type: 'result', reqId: command.reqId, ok: true });
+  assert.equal((await creating).id, 'b1.2');
+});
+
+test('MIRROR-B15 listing a directory asks the Bridge and returns what it reported', async () => {
+  const hub = new SessionHub();
+  const bridge = connectBridge(hub, 'b1', [tab('b1.1')]);
+  const listing = hub.listDirectory('/home/joslyn');
+  const command = bridge.ch.last('list-dirs');
+  assert.equal(command.path, '/home/joslyn');
+  bridge.send({
+    type: 'result',
+    reqId: command.reqId,
+    ok: true,
+    result: { path: '/home/joslyn', parent: '/', name: 'joslyn', directories: ['code'], files: [] }
+  });
+  assert.deepEqual(await listing, {
+    path: '/home/joslyn', parent: '/', name: 'joslyn', directories: ['code'], files: []
+  });
+});
+
+test('MIRROR-B16 a directory the Bridge cannot read surfaces as an error', async () => {
+  const hub = new SessionHub();
+  const bridge = connectBridge(hub, 'b1', [tab('b1.1')]);
+  const listing = hub.listDirectory('/nope');
+  const command = bridge.ch.last('list-dirs');
+  bridge.send({ type: 'result', reqId: command.reqId, ok: false, error: '无法访问目录：/nope' });
+  await assert.rejects(listing, (err) => err instanceof HubError && /无法访问目录/.test(err.message));
+});
+
+test('MIRROR-B17 a session reports the environment it runs in, next to the Bridge origin', () => {
+  const hub = new SessionHub();
+  connectBridge(hub, 'win', [{ id: 'win.1', title: 'PowerShell', cols: 80, rows: 24, environment: 'Windows' }], 'Windows');
+  connectBridge(hub, 'wsl', [{ id: 'wsl.1', title: 'wsl', cols: 80, rows: 24, environment: 'WSL' }], 'Windows');
+  const list = hub.list();
+  assert.deepEqual(list.sessions.map((s) => [s.id, s.origin, s.environment]), [
+    ['win.1', 'Windows', 'Windows'],
+    ['wsl.1', 'Windows', 'WSL']
+  ]);
 });
