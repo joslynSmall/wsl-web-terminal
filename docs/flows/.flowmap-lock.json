@@ -1,0 +1,125 @@
+{
+  "flows": {
+    "MIRROR": {
+      "files": {
+        "bridge/scripts/install.mjs": {
+          "branches": [
+            "MIRROR-B20"
+          ],
+          "hash": "a2346fa7462e19c9c4018ec4d7544c5e059cea93"
+        },
+        "bridge/src/bridge-core.js": {
+          "branches": [
+            "MIRROR-B07",
+            "MIRROR-B08",
+            "MIRROR-B11"
+          ],
+          "hash": "2e23d52082b1536844725b79241784fcf8daf359"
+        },
+        "bridge/src/directories.js": {
+          "branches": [
+            "MIRROR-B15",
+            "MIRROR-B16"
+          ],
+          "hash": "20a6b375600697a2d9f34b5a358eb55e4127db9f"
+        },
+        "bridge/src/index.js": {
+          "branches": [
+            "MIRROR-B12",
+            "MIRROR-B13",
+            "MIRROR-B14",
+            "MIRROR-B17",
+            "MIRROR-B18"
+          ],
+          "hash": "c829e48c083260fcbc460a0880716f5cee01fd7f"
+        },
+        "public/app.js": {
+          "branches": [
+            "MIRROR-B07",
+            "MIRROR-B09",
+            "MIRROR-B15",
+            "MIRROR-B16",
+            "MIRROR-B17",
+            "MIRROR-B19"
+          ],
+          "hash": "65d21d7c5b9363b1be9a92393e67b38f19556aa7"
+        },
+        "src/server.js": {
+          "branches": [
+            "MIRROR-B06"
+          ],
+          "hash": "fd50b870ebb962c146347550092d8b84779c0fef"
+        },
+        "src/session-hub.js": {
+          "branches": [
+            "MIRROR-B01",
+            "MIRROR-B02",
+            "MIRROR-B03",
+            "MIRROR-B04",
+            "MIRROR-B05",
+            "MIRROR-B10",
+            "MIRROR-B12",
+            "MIRROR-B13",
+            "MIRROR-B14",
+            "MIRROR-B15",
+            "MIRROR-B19"
+          ],
+          "hash": "56b4bcb524a626390a88395214f75a3929373d54"
+        },
+        "test/app.test.js": {
+          "branches": [
+            "MIRROR-B07",
+            "MIRROR-B09",
+            "MIRROR-B14",
+            "MIRROR-B19"
+          ],
+          "hash": "188129af8e2f66ac6dad85a2ae20a9a6ed260c04"
+        },
+        "test/bridge-core.test.js": {
+          "branches": [
+            "MIRROR-B08",
+            "MIRROR-B11",
+            "MIRROR-B17",
+            "MIRROR-B18"
+          ],
+          "hash": "309d7454c193357fc9a95348e939529292cb26e9"
+        },
+        "test/bridge-paths.test.js": {
+          "branches": [
+            "MIRROR-B15",
+            "MIRROR-B16"
+          ],
+          "hash": "ba223eed522d66a72c1e98e993f1f768945cabdf"
+        },
+        "test/install.test.js": {
+          "branches": [
+            "MIRROR-B20"
+          ],
+          "hash": "eb9ead448a46d96650942eedd75f568b43b849ba"
+        },
+        "test/server.test.js": {
+          "branches": [
+            "MIRROR-B06"
+          ],
+          "hash": "57be0f3e929b998e235987a672be1dcbdf3dfb64"
+        },
+        "test/session-hub.test.js": {
+          "branches": [
+            "MIRROR-B01",
+            "MIRROR-B02",
+            "MIRROR-B03",
+            "MIRROR-B04",
+            "MIRROR-B05",
+            "MIRROR-B10",
+            "MIRROR-B12",
+            "MIRROR-B13"
+          ],
+          "hash": "038cd6726b36409c6184da66f863e9aa9e6910d5"
+        }
+      },
+      "flowHash": "10e963e1b9b55b4210fd1e59853e9857fe2d188a",
+      "verifiedAt": "2026-11-14"
+    }
+  },
+  "version": 1
+}

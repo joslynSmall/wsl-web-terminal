@@ -15,3 +15,11 @@ _Avoid_: Mirrored tab, attached shell, external shell
 **Bridge (桥接器)**:
 The piece running inside a third-party terminal app (one per Tabby window) that connects its sessions to this application's server.
 _Avoid_: Plugin (when speaking about the concept rather than Tabby's packaging), connector, agent
+
+**Origin (来源)**:
+The system a Bridge is running on, either Windows or WSL. The web UI shows it on a tab title only while Bridges from more than one Origin are connected. It is not a window number.
+_Avoid_: Host, machine, platform (when speaking about this label)
+
+**Environment (环境)**:
+The system a Terminal Session itself runs on, either Windows or WSL. It is independent of Origin: a WSL pane opened inside a Windows Tabby still has Origin Windows but Environment WSL. The web UI marks a WSL pane's tab title with `[WSL]`.
+_Avoid_: Origin (when speaking about this label), platform (when speaking about this label)
