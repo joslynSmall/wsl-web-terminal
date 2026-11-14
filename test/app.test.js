@@ -18,6 +18,7 @@ function element() {
   return {
     textContent: '',
     className: '',
+    style: {},
     set innerHTML(value) { this.children = []; this._html = value; },
     get innerHTML() { return this._html || ''; },
     children: [],
@@ -25,18 +26,26 @@ function element() {
     classList: {
       add: name => classes.add(name),
       remove: name => classes.delete(name),
-      contains: name => classes.has(name)
+      contains: name => classes.has(name),
+      toggle(name, force) {
+        const on = force === undefined ? !classes.has(name) : !!force;
+        if (on) classes.add(name);
+        else classes.delete(name);
+        return on;
+      }
     },
     appendChild(child) { this.children.push(child); },
     addEventListener(name, callback) { this.listeners.set(name, callback); }
   };
 }
 
-async function createApp({ sessions = [first], bridges = 1, mobile, focusedId = null } = {}) {
+async function createApp({ sessions = [first], bridges = 1, mobile, focusedId = null, showOrigin = false } = {}) {
   const elements = new Map();
   const sockets = [];
   const errors = [];
   const requests = [];
+  const timers = [];
+  let nextTimerId = 1;
   let terminal;
   let confirmAnswer = true;
 
@@ -94,8 +103,8 @@ async function createApp({ sessions = [first], bridges = 1, mobile, focusedId = 
     inputs() { return this.sent.map(s => JSON.parse(s)).filter(m => m.t === 'input').map(m => m.data); }
   }
 
-  const listResponse = (list = sessions, count = bridges, focus = focusedId) => ({
-    json: async () => ({ success: true, bridges: count, sessions: list, focusedId: focus })
+  const listResponse = (list = sessions, count = bridges, focus = focusedId, originVisible = showOrigin) => ({
+    json: async () => ({ success: true, bridges: count, sessions: list, focusedId: focus, showOrigin: originVisible })
   });
   const context = vm.createContext({
     document: {
@@ -104,15 +113,31 @@ async function createApp({ sessions = [first], bridges = 1, mobile, focusedId = 
         return elements.get(id);
       },
       createElement: element,
-      addEventListener() {}
+      visibilityState: 'visible',
+      listeners: new Map(),
+      addEventListener(name, callback) { this.listeners.set(name, callback); }
     },
     window: {
       Terminal,
+      innerHeight: 844,
+      visualViewport: {
+        height: 844,
+        listeners: new Map(),
+        addEventListener(name, callback) { this.listeners.set(name, callback); }
+      },
       matchMedia: mobile === undefined ? undefined : (query) => ({ matches: mobile && /max-width/.test(query) }),
-      addEventListener() {}
+      listeners: new Map(),
+      scrollTo() {},
+      addEventListener(name, callback) { this.listeners.set(name, callback); }
     },
     WebSocket: Socket,
     location: { protocol: 'http:', host: 'localhost:7891' },
+    localStorage: {
+      store: new Map(),
+      getItem(key) { return this.store.has(key) ? this.store.get(key) : null; },
+      setItem(key, value) { this.store.set(key, String(value)); },
+      removeItem(key) { this.store.delete(key); }
+    },
     console: { error: (...args) => errors.push(args) },
     fetch: async (url, options) => {
       requests.push([url, options?.method || 'GET']);
@@ -121,7 +146,15 @@ async function createApp({ sessions = [first], bridges = 1, mobile, focusedId = 
     confirm: () => confirmAnswer,
     prompt: () => 'renamed',
     setInterval() {},
-    setTimeout() {},
+    setTimeout(fn, delay) {
+      const id = nextTimerId++;
+      timers.push({ id, fn, delay, cancelled: false });
+      return id;
+    },
+    clearTimeout(id) {
+      const t = timers.find(item => item.id === id);
+      if (t) t.cancelled = true;
+    },
     alert(message) { assert.fail(message); }
   });
 
@@ -134,6 +167,7 @@ async function createApp({ sessions = [first], bridges = 1, mobile, focusedId = 
     elements,
     sockets,
     terminal,
+    timers,
     errors,
     requests,
     badge,
@@ -151,6 +185,7 @@ async function createApp({ sessions = [first], bridges = 1, mobile, focusedId = 
 }
 
 const activeId = app => vm.runInContext('activeId', app.context);
+const newTermState = app => vm.runInContext('newTerm', app.context);
 
 test('the first session is selected and connected by session id, without sending a size', async () => {
   const app = await createApp();
@@ -177,7 +212,7 @@ test('creating a session connects before the session list refresh completes', { 
     return refresh.promise;
   };
 
-  const creation = app.elements.get('btn-new-window').listeners.get('click')();
+  const creation = app.context.submitNewTerminal();
   await refreshStarted.promise;
   assert.equal(app.sockets.length, 2);
   assert.equal(oldSocket.readyState, 3);
@@ -190,13 +225,13 @@ test('creating a session connects before the session list refresh completes', { 
   assert.equal(activeId(app), second.id);
 });
 
-test('a refused creation is shown to the user and does not change the selection', async () => {
+test('a refused creation is shown in the panel and does not change the selection', async () => {
   const app = await createApp();
-  const alerts = [];
-  app.context.alert = message => alerts.push(message);
   app.context.fetch = async () => ({ json: async () => ({ success: false, error: 'No Tabby window is connected' }) });
-  await app.elements.get('btn-new-window').listeners.get('click')();
-  assert.match(alerts[0], /No Tabby window is connected/);
+  app.elements.get('btn-new-window').listeners.get('click')();
+  await app.context.submitNewTerminal();
+  assert.equal(app.elements.get('new-terminal-panel').classList.contains('hidden'), false, 'the panel stays open');
+  assert.equal(app.elements.get('new-term-browse-error').textContent, 'No Tabby window is connected');
   assert.equal(activeId(app), first.id);
   assert.equal(app.sockets.length, 1);
 });
@@ -370,6 +405,27 @@ test('tab titles carry the Tabby window only when more than one window is connec
   assert.deepEqual(labels(), ['first']);
 });
 
+test('MIRROR-B02 origin is shown only while the server says more than one origin is connected', async () => {
+  const windows = { ...first, origin: 'Windows' };
+  const wsl = { ...second, windowNo: 2, origin: 'WSL' };
+  const app = await createApp({ sessions: [windows, wsl], bridges: 2, showOrigin: true });
+  const labels = () => app.elements.get('tabs-list').children.map(tab => tab.children[0].textContent);
+  assert.deepEqual(labels(), ['[Windows] [W1] first', '[WSL] [W2] second']);
+
+  app.context.fetch = async () => app.listResponse([windows], 1, null, false);
+  await app.context.fetchSessions();
+  assert.deepEqual(labels(), ['first'], 'MIRROR-B04 the label goes away when only one origin remains');
+});
+
+test('MIRROR-B03 a session without an origin is labelled 未知 when origins are shown', async () => {  const app = await createApp({
+    sessions: [{ ...first, origin: '' }, { ...second, windowNo: 2, origin: 'WSL' }],
+    bridges: 2,
+    showOrigin: true
+  });
+  const labels = () => app.elements.get('tabs-list').children.map(tab => tab.children[0].textContent);
+  assert.deepEqual(labels(), ['[未知] [W1] first', '[WSL] [W2] second']);
+});
+
 test('a dropped connection is retried with backoff instead of every second', async () => {
   const app = await createApp();
   const socket = app.sockets[0];
@@ -469,10 +525,12 @@ function fontAwareTerminal(app, cols, rows) {
   let size = 14;
   term.screenBox = { offsetWidth: 0, offsetHeight: 0 }; // 同一个对象，像真实的 .xterm-screen 元素一样原地改尺寸
   const measure = () => {
-    term.screenBox.offsetWidth = cols * Math.round(size * 0.6);
-    term.screenBox.offsetHeight = rows * Math.ceil(size * 1.15);
+    term.screenBox.offsetWidth = term.cols * Math.round(size * 0.6);
+    term.screenBox.offsetHeight = term.rows * Math.ceil(size * 1.15);
   };
   measure();
+  const resize = term.resize.bind(term);
+  term.resize = (c, r) => { resize(c, r); measure(); };
   Object.defineProperty(term.options, 'fontSize', {
     get: () => size,
     set: (value) => { size = value; measure(); },
@@ -481,57 +539,167 @@ function fontAwareTerminal(app, cols, rows) {
   return () => term.screenBox;
 }
 
-test('in full screen the font grows until the whole terminal fits, and goes back on exit', async () => {
+// 网页打开着的窗格按网页大小排版：字号保持正常，按单元格尺寸算出可视区放得下的行列，发给服务
+function sizedApp(app, { cols = 140, rows = 44, width = 1600, height = 900 } = {}) {
+  fontAwareTerminal(app, cols, rows);
+  const container = app.elements.get('terminal-container');
+  Object.assign(container, { clientWidth: width, clientHeight: height });
+  const socket = app.sockets.at(-1);
+  socket.emit('open');
+  const resizes = () => socket.sent.map(s => JSON.parse(s)).filter(m => m.t === 'resize');
+  return { container, socket, resizes };
+}
+
+test('MIRROR-B07 on connect the page asks Tabby for the size that fills it at the normal font', async () => {
   const app = await createApp({ mobile: false });
-  const box = fontAwareTerminal(app, 154, 60);
-  const wrapper = app.elements.get('terminal-wrapper');
-  Object.assign(wrapper, { clientWidth: 1896, clientHeight: 1100 });
-  const doc = app.context.document;
-
-  doc.fullscreenElement = {};
-  app.context.onFullscreenChange();
-  const size = app.terminal.options.fontSize;
-  assert.ok(size > 14, `expected a bigger font than the default, got ${size}`);
-  assert.ok(box().offsetWidth <= 1896 && box().offsetHeight <= 1100, 'the whole terminal fits');
-  app.terminal.options.fontSize = size + 1;
-  assert.ok(box().offsetWidth > 1896 || box().offsetHeight > 1100, 'one size bigger would not fit');
-  app.terminal.options.fontSize = size;
-
-  // the window changes size while in full screen: refit (1040 still fits the base font's 1020px;
-  // below that the font would have to shrink past the base size, which is not allowed)
-  wrapper.clientHeight = 1040;
-  app.context.handleResize();
-  assert.ok(app.terminal.options.fontSize < size);
-  assert.ok(box().offsetHeight <= 1040);
-
-  doc.fullscreenElement = null;
-  app.context.onFullscreenChange();
-  assert.equal(app.terminal.options.fontSize, 14);
+  const { socket, resizes } = sizedApp(app, { cols: 140, rows: 44, width: 1600, height: 900 });
+  socket.receive({ t: 'snapshot', data: '', cols: 140, rows: 44 });
+  // 14px font: cell 8 x 17 px -> 1600/8 = 200 columns, 900/17 = 52 rows
+  assert.deepEqual(resizes(), [{ t: 'resize', cols: 200, rows: 52 }]);
+  assert.equal(app.terminal.options.fontSize, 14, 'the font is never scaled to fit');
 });
 
-test('in full screen a terminal bigger than the screen keeps the normal font and scrolls, never shrinks', async () => {
+test('MIRROR-B07 a phone-sized page asks for a phone-sized terminal at the 12px font', async () => {
+  const app = await createApp({ mobile: true });
+  const { socket, resizes } = sizedApp(app, { cols: 140, rows: 44, width: 360, height: 640 });
+  app.terminal.options.fontSize = 12;
+  socket.receive({ t: 'snapshot', data: '', cols: 140, rows: 44 });
+  // 12px font: cell 7 x 14 px -> 360/7 = 51 columns, 640/14 = 45 rows
+  assert.deepEqual(resizes().at(-1), { t: 'resize', cols: 51, rows: 45 });
+  assert.equal(app.terminal.options.fontSize, 12);
+});
+
+test('MIRROR-B07 resizing the page or changing the font sends the new size once', async () => {
   const app = await createApp({ mobile: false });
-  fontAwareTerminal(app, 154, 60);
-  Object.assign(app.elements.get('terminal-wrapper'), { clientWidth: 400, clientHeight: 300 });
+  const { container, socket, resizes } = sizedApp(app);
+  socket.receive({ t: 'snapshot', data: '', cols: 140, rows: 44 });
+  socket.receive({ t: 'size', cols: 200, rows: 52 });
+
+  app.context.handleResize();
+  assert.equal(resizes().length, 1, 'an unchanged page does not resend');
+
+  container.clientWidth = 800;
+  app.context.handleResize();
+  assert.deepEqual(resizes().at(-1), { t: 'resize', cols: 100, rows: 52 });
+
+  app.elements.get('btn-font-inc').listeners.get('click')();
+  assert.equal(app.terminal.options.fontSize, 15);
+  // 15px font: cell 9 x 18 px -> 800/9 = 88 columns, 900/18 = 50 rows
+  assert.deepEqual(resizes().at(-1), { t: 'resize', cols: 88, rows: 50 });
+});
+
+test('MIRROR-B09 a size reported by Tabby is shown as is and not fought over', async () => {
+  const app = await createApp({ mobile: false });
+  const { socket, resizes } = sizedApp(app);
+  socket.receive({ t: 'snapshot', data: '', cols: 140, rows: 44 });
+  socket.receive({ t: 'size', cols: 200, rows: 52 });
+  const sent = resizes().length;
+
+  // the user resizes the Tabby window by hand
+  socket.receive({ t: 'size', cols: 120, rows: 30 });
+  assert.equal(app.terminal.cols, 120);
+  assert.equal(app.terminal.rows, 30);
+  assert.equal(resizes().length, sent, 'the page does not immediately take the size back');
+});
+
+test('MIRROR-B09 coming back to the page after using Tabby takes the page size back', async () => {
+  const app = await createApp({ mobile: false });
+  const { socket, resizes } = sizedApp(app);
+  socket.receive({ t: 'snapshot', data: '', cols: 140, rows: 44 });
+  const pageSize = resizes().at(-1);
+  socket.receive({ t: 'size', cols: pageSize.cols, rows: pageSize.rows });
+
+  // the user works in Tabby, which refits the pane to its own window
+  socket.receive({ t: 'size', cols: 120, rows: 30 });
+  const before = resizes().length;
+
+  // switching back to the browser window
+  app.context.window.listeners.get('focus')();
+  assert.equal(resizes().length, before + 1);
+  assert.deepEqual(resizes().at(-1), pageSize);
+
+  // a hidden tab becoming visible again does the same
+  socket.receive({ t: 'size', cols: 120, rows: 30 });
+  app.context.document.visibilityState = 'hidden';
+  app.context.document.listeners.get('visibilitychange')();
+  assert.equal(resizes().length, before + 1, 'nothing is sent while the tab is hidden');
+  app.context.document.visibilityState = 'visible';
+  app.context.document.listeners.get('visibilitychange')();
+  assert.deepEqual(resizes().at(-1), pageSize);
+  assert.equal(resizes().length, before + 2);
+});
+
+test('full screen keeps the normal font; the extra room becomes more columns and rows', async () => {
+  const app = await createApp({ mobile: false });
+  const { container, socket, resizes } = sizedApp(app, { width: 1600, height: 900 });
+  socket.receive({ t: 'snapshot', data: '', cols: 140, rows: 44 });
+  Object.assign(container, { clientWidth: 1920, clientHeight: 1080 });
   app.context.document.fullscreenElement = {};
   app.context.onFullscreenChange();
   assert.equal(app.terminal.options.fontSize, 14);
+  assert.deepEqual(resizes().at(-1), { t: 'resize', cols: 240, rows: 63 });
 });
 
-test('A+/A- in full screen starts from the fitted size and stops auto-fitting', async () => {
+test('MIRROR-B11 nothing is sent while the socket is not open; a page too small still asks for a usable minimum', async () => {
   const app = await createApp({ mobile: false });
-  fontAwareTerminal(app, 154, 60);
-  const wrapper = app.elements.get('terminal-wrapper');
-  Object.assign(wrapper, { clientWidth: 1896, clientHeight: 1100 });
-  app.context.document.fullscreenElement = {};
-  app.context.onFullscreenChange();
-  const fitted = app.terminal.options.fontSize;
-
-  app.elements.get('btn-font-dec').listeners.get('click')();
-  assert.equal(app.terminal.options.fontSize, fitted - 1);
-  wrapper.clientHeight = 2000; // a resize no longer re-fits
+  fontAwareTerminal(app, 140, 44);
+  const container = app.elements.get('terminal-container');
+  Object.assign(container, { clientWidth: 1600, clientHeight: 900 });
+  const socket = app.sockets.at(-1);
   app.context.handleResize();
-  assert.equal(app.terminal.options.fontSize, fitted - 1);
+  assert.equal(socket.sent.length, 0, 'not connected yet');
+
+  socket.emit('open');
+  Object.assign(container, { clientWidth: 50, clientHeight: 40 });
+  socket.receive({ t: 'snapshot', data: '', cols: 140, rows: 44 });
+  const last = socket.sent.map(s => JSON.parse(s)).filter(m => m.t === 'resize').at(-1);
+  assert.deepEqual(last, { t: 'resize', cols: 20, rows: 5 });
+});
+
+test('MIRROR-B07 measures #terminal-wrapper so temporary scrollbars on #terminal-container do not steal columns', async () => {
+  const app = await createApp({ mobile: false });
+  const { container, socket, resizes } = sizedApp(app, { cols: 180, rows: 62, width: 1584, height: 900 });
+  const wrapper = app.elements.get('terminal-wrapper');
+  Object.assign(wrapper, { clientWidth: 1600, clientHeight: 900 });
+  socket.receive({ t: 'snapshot', data: '', cols: 180, rows: 62 });
+  // wrapper 1600/8 = 200 cols (even though container lost 16px to a temporary vertical scrollbar)
+  assert.deepEqual(resizes().at(-1), { t: 'resize', cols: 200, rows: 52 });
+  assert.equal(container.clientWidth, 1584);
+});
+
+test('MIRROR-B07 mobile keyboard open and close settles to full screen even after 120ms animation', async () => {
+  const app = await createApp({ mobile: true });
+  const { container, socket, resizes } = sizedApp(app, { cols: 140, rows: 44, width: 360, height: 640 });
+  app.terminal.options.fontSize = 12;
+  socket.receive({ t: 'snapshot', data: '', cols: 140, rows: 44 });
+  socket.receive({ t: 'size', cols: 51, rows: 45 });
+
+  const vv = app.context.window.visualViewport;
+  // Soft keyboard opens: visualViewport shrinks
+  vv.height = 460;
+  Object.assign(container, { clientWidth: 360, clientHeight: 310 });
+  vv.listeners.get('resize')();
+  assert.equal(app.elements.get('app-root').style.height, '460px');
+  for (const t of app.timers.filter(item => !item.cancelled)) { t.cancelled = true; t.fn(); }
+  assert.deepEqual(resizes().at(-1), { t: 'resize', cols: 51, rows: 22 });
+  socket.receive({ t: 'size', cols: 51, rows: 22 });
+
+  // Soft keyboard closes: at 120ms container is still animating (540px), at 360ms it reaches full height (640px)
+  vv.height = 844;
+  Object.assign(container, { clientWidth: 360, clientHeight: 540 });
+  vv.listeners.get('resize')();
+  assert.equal(app.elements.get('app-root').style.height, '');
+  const t120 = app.timers.filter(item => !item.cancelled && item.delay === 120).at(-1);
+  t120.cancelled = true;
+  t120.fn();
+  assert.deepEqual(resizes().at(-1), { t: 'resize', cols: 51, rows: 38 });
+  socket.receive({ t: 'size', cols: 51, rows: 38 });
+
+  Object.assign(container, { clientWidth: 360, clientHeight: 640 });
+  const t360 = app.timers.filter(item => !item.cancelled && item.delay === 360).at(-1);
+  t360.cancelled = true;
+  t360.fn();
+  assert.deepEqual(resizes().at(-1), { t: 'resize', cols: 51, rows: 45 });
 });
 
 function pannableApp(app, { scrollHeight = 960, clientHeight = 300, clientWidth = 400, scrollWidth = 1232 } = {}) {
@@ -661,4 +829,209 @@ test('a really wide terminal still follows the cursor sideways', async () => {
 
   socket.receive({ t: 'snapshot', data: 'screen', cols: 154, rows: 60 });
   assert.equal(container.scrollLeft, 101 * 8 - 400, 'cursor column is brought into view');
+});
+
+test('MIRROR-B17 a WSL pane is marked in the tab label, a Windows pane is not', async () => {
+  const win = { ...first, environment: 'Windows' };
+  const wsl = { ...second, windowNo: 2, environment: 'WSL' };
+  const app = await createApp({ sessions: [win, wsl], bridges: 1 });
+  const labels = () => app.elements.get('tabs-list').children.map(tab => tab.children[0].textContent);
+  assert.deepEqual(labels(), ['first', '[WSL] second']);
+});
+
+test('MIRROR-B12 and MIRROR-B13 the new-terminal panel sends the chosen environment and directory', async () => {
+  const app = await createApp();
+  const posts = [];
+  app.context.fetch = async (url, options) => {
+    if (options?.method === 'POST') {
+      posts.push([url, JSON.parse(options.body)]);
+      return { json: async () => ({ success: true, session: second }) };
+    }
+    return app.listResponse();
+  };
+
+  app.elements.get('btn-new-window').listeners.get('click')();
+  assert.equal(app.elements.get('new-terminal-panel').classList.contains('hidden'), false);
+
+  // pick the WSL environment
+  const envOptions = app.elements.get('new-term-env-list').children;
+  assert.equal(envOptions.length, 2);
+  envOptions[1].listeners.get('click')();
+  assert.equal(newTermState(app).environment, 'WSL');
+
+  // choose a directory
+  vm.runInContext("newTerm.cwd = '/home/joslyn/code'", app.context);
+  await app.context.submitNewTerminal();
+
+  assert.deepEqual(posts, [['/api/sessions', { environment: 'WSL', cwd: '/home/joslyn/code' }]]);
+  assert.equal(app.elements.get('new-terminal-panel').classList.contains('hidden'), true);
+});
+
+test('MIRROR-B14 creating without a directory sends an empty one', async () => {
+  const app = await createApp();
+  const posts = [];
+  app.context.fetch = async (url, options) => {
+    if (options?.method === 'POST') {
+      posts.push(JSON.parse(options.body));
+      return { json: async () => ({ success: true, session: second }) };
+    }
+    return app.listResponse();
+  };
+  await app.context.submitNewTerminal();
+  assert.deepEqual(posts, [{ environment: 'Windows', cwd: '' }]);
+});
+
+test('MIRROR-B15 the directory browser lists what the service reports and can go up one level', async () => {
+  const app = await createApp();
+  const requested = [];
+  app.context.fetch = async (url) => {
+    requested.push(url);
+    return {
+      json: async () => ({
+        success: true,
+        listing: { path: '/home/joslyn', parent: '/home', name: 'joslyn', directories: ['code', 'docs'], files: ['notes.txt'] }
+      })
+    };
+  };
+
+  await app.context.openDirectoryBrowser();
+  assert.deepEqual(requested, ['/api/directories?path=C%3A%5C'], 'the browser starts at the root of the chosen environment');
+  const list = app.elements.get('new-term-browse-list');
+  const labels = list.children.map(el => el.textContent);
+  assert.deepEqual(labels, ['..', 'code', 'docs']);
+
+  await app.context.goToParentDirectory();
+  assert.equal(requested[1], '/api/directories?path=%2Fhome');
+});
+
+test('MIRROR-B16 a directory the service cannot read is shown as an error', async () => {
+  const app = await createApp();
+  app.context.fetch = async () => ({ json: async () => ({ success: false, error: '无法访问目录：/nope' }) });
+  await app.context.openDirectoryBrowser();
+  const error = app.elements.get('new-term-browse-error');
+  assert.equal(error.classList.contains('hidden'), false);
+  assert.match(error.textContent, /无法访问目录/);
+  assert.equal(app.elements.get('new-term-browse-list').children.length, 0);
+});
+
+test('switching the environment clears the directory, because the browser is filtered by environment', async () => {
+  const app = await createApp();
+  vm.runInContext("newTerm.cwd = '/home/joslyn'", app.context);
+  app.context.selectEnvironment('WSL');
+  assert.equal(newTermState(app).cwd, '');
+  vm.runInContext("newTerm.cwd = 'C:\\\\Users'", app.context);
+  app.context.selectEnvironment('Windows');
+  assert.equal(newTermState(app).cwd, '');
+});
+
+test('MIRROR-B15 choosing the directory the browser is showing fills in the working directory', async () => {
+  const app = await createApp();
+  app.context.fetch = async () => ({
+    json: async () => ({
+      success: true,
+      listing: { path: '/home/joslyn/code', parent: '/home/joslyn', name: 'code', directories: ['app'], files: [] }
+    })
+  });
+  await app.context.openDirectoryBrowser();
+  app.elements.get('new-term-browse-use').listeners.get('click')();
+  assert.equal(newTermState(app).cwd, '/home/joslyn/code');
+  assert.equal(app.elements.get('new-term-browse-list').classList.contains('hidden'), false, 'the browser stays until it is closed');
+  assert.equal(app.elements.get('new-term-browser').classList.contains('hidden'), true, 'the browser closes after choosing');
+  assert.equal(app.elements.get('new-term-cwd-value').textContent, '/home/joslyn/code');
+});
+
+test('MIRROR-B15 a path typed into the panel is used as the working directory', async () => {
+  const app = await createApp();
+  const posts = [];
+  app.context.fetch = async (url, options) => {
+    if (options?.method === 'POST') {
+      posts.push(JSON.parse(options.body));
+      return { json: async () => ({ success: true, session: second }) };
+    }
+    return app.listResponse();
+  };
+  const input = app.elements.get('new-term-cwd-input');
+  input.value = '/home/joslyn/code';
+  input.listeners.get('change')();
+  await app.context.submitNewTerminal();
+  assert.deepEqual(posts, [{ environment: 'Windows', cwd: '/home/joslyn/code' }]);
+});
+
+test('MIRROR-B19 a chosen directory is remembered and offered next time', async () => {
+  const app = await createApp();
+  const posts = [];
+  app.context.fetch = async (url, options) => {
+    if (options?.method === 'POST') {
+      posts.push(JSON.parse(options.body));
+      return { json: async () => ({ success: true, session: second }) };
+    }
+    if (url.startsWith('/api/directories/exists')) {
+      return { json: async () => ({ success: true, exists: true }) };
+    }
+    return app.listResponse();
+  };
+
+  app.elements.get('btn-new-window').listeners.get('click')();
+  await app.context.submitNewTerminal();
+  assert.deepEqual(posts.at(-1), { environment: 'Windows', cwd: '' });
+
+  // now pick a directory and create again
+  app.elements.get('btn-new-window').listeners.get('click')();
+  await app.context.submitNewTerminal();
+  vm.runInContext("newTerm.cwd = 'C:\\\\Users\\\\joslyn\\\\code'", app.context);
+  await app.context.submitNewTerminal();
+  assert.deepEqual(posts.at(-1), { environment: 'Windows', cwd: 'C:\\Users\\joslyn\\code' });
+
+  const stored = JSON.parse(app.context.localStorage.getItem('wsl_term_recent_dirs'));
+  assert.deepEqual(stored.Windows, ['C:\\Users\\joslyn\\code']);
+});
+
+test('MIRROR-B19 the recent list is shown for the current environment and picks a directory', async () => {
+  const app = await createApp();
+  app.context.localStorage.setItem('wsl_term_recent_dirs', JSON.stringify({
+    Windows: ['C:\\Users\\joslyn\\code'],
+    WSL: ['/home/joslyn/code']
+  }));
+  app.context.fetch = async (url) => {
+    if (url.startsWith('/api/directories/exists')) {
+      return { json: async () => ({ success: true, exists: true }) };
+    }
+    return app.listResponse();
+  };
+
+  app.elements.get('btn-new-window').listeners.get('click')();
+  await new Promise((r) => setTimeout(r, 10));
+  const items = () => app.elements.get('new-term-recent-list').children;
+  assert.equal(items().length, 1);
+  assert.equal(items()[0].children[1].textContent, 'C:\\Users\\joslyn\\code');
+
+  // switching to WSL shows the WSL entries instead
+  app.elements.get('new-term-env-list').children[1].listeners.get('click')();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(items().length, 1);
+  assert.equal(items()[0].children[1].textContent, '/home/joslyn/code');
+
+  // clicking one fills in the working directory
+  items()[0].listeners.get('click')();
+  assert.equal(newTermState(app).cwd, '/home/joslyn/code');
+});
+
+test('MIRROR-B19 a remembered directory that is gone is dropped from the list', async () => {
+  const app = await createApp();
+  app.context.localStorage.setItem('wsl_term_recent_dirs', JSON.stringify({
+    Windows: ['C:\\gone', 'C:\\Users\\joslyn\\code'],
+    WSL: []
+  }));
+  app.context.fetch = async (url) => {
+    if (url.startsWith('/api/directories/exists')) {
+      const path = decodeURIComponent(url.split('path=')[1]);
+      return { json: async () => ({ success: true, exists: path !== 'C:\\gone' }) };
+    }
+    return app.listResponse();
+  };
+  app.elements.get('btn-new-window').listeners.get('click')();
+  await new Promise((r) => setTimeout(r, 30));
+  const stored = JSON.parse(app.context.localStorage.getItem('wsl_term_recent_dirs'));
+  assert.deepEqual(stored.Windows, ['C:\\Users\\joslyn\\code']);
+  assert.equal(app.elements.get('new-term-recent-list').children.length, 1);
 });

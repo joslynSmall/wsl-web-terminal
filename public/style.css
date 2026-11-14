@@ -1,35 +1,37 @@
 :root {
-  --bg-dark: #11111b;
-  --bg-surface: #181825;
-  --bg-card: #1e1e2e;
-  --bg-tab: #252538;
-  --bg-tab-active: #313244;
-  --text-main: #cdd6f4;
-  --text-muted: #8b8ea6;
-  --primary: #89b4fa;
-  --primary-hover: #b4befe;
-  --success: #a6e3a1;
-  --danger: #f38ba8;
-  --danger-hover: #eba0ac;
-  --border: #313244;
-  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
+  --bg-terminal: #09090b;
+  --bg-chrome: #111113;
+  --bg-surface: #18181b;
+  --bg-elevated: #222226;
+  --bg-hover: #27272c;
+  --text-main: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --accent: #f4f4f5;
+  --ok: #22c55e;
+  --err: #f87171;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html, body {
   width: 100%;
   height: 100dvh;
   overflow: hidden;
-  background-color: var(--bg-dark);
+  background-color: var(--bg-terminal);
   color: var(--text-main);
-  font-family: var(--font-family);
+  font-family: var(--font-sans);
   font-size: 13px;
+  -webkit-font-smoothing: antialiased;
 }
 
 .app-layout {
@@ -38,8 +40,12 @@ html, body {
   width: 100vw;
   height: 100dvh;
   overflow: hidden;
+  background-color: var(--bg-terminal);
 }
 
+/* ==========================================================================
+   顶部控制条
+   ========================================================================== */
 .top-nav {
   display: flex;
   justify-content: space-between;
@@ -47,27 +53,38 @@ html, body {
   height: 40px;
   min-height: 40px;
   padding: 0 12px;
-  background-color: var(--bg-surface);
+  background-color: var(--bg-chrome);
   border-bottom: 1px solid var(--border);
   user-select: none;
-  transition: all 0.2s ease;
+  gap: 8px;
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
-.brand-icon {
-  font-size: 16px;
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  flex-shrink: 0;
 }
 
 .brand-title {
   font-weight: 600;
   font-size: 13px;
-  letter-spacing: 0.3px;
-  color: var(--primary);
+  letter-spacing: -0.01em;
+  color: var(--text-main);
+  white-space: nowrap;
 }
 
 .badge {
@@ -77,157 +94,212 @@ html, body {
   flex-shrink: 0;
   padding: 2px 8px;
   font-size: 11px;
-  border-radius: 12px;
   font-weight: 500;
+  border-radius: 999px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  letter-spacing: 0.01em;
 }
 
 .badge-connected {
-  background-color: rgba(166, 227, 161, 0.15);
-  color: var(--success);
-  border: 1px solid rgba(166, 227, 161, 0.3);
+  color: var(--ok);
+  border-color: rgba(34, 197, 94, 0.22);
+  background-color: rgba(34, 197, 94, 0.08);
 }
 
 .badge-disconnected {
-  background-color: rgba(243, 139, 168, 0.15);
-  color: var(--danger);
-  border: 1px solid rgba(243, 139, 168, 0.3);
+  color: var(--err);
+  border-color: rgba(248, 113, 113, 0.22);
+  background-color: rgba(248, 113, 113, 0.08);
 }
 
 .actions {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+}
+
+.action-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   white-space: nowrap;
   flex-shrink: 0;
   gap: 5px;
-  padding: 4px 10px;
-  border-radius: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 6px;
   border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease-in-out;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease, transform 0.08s ease;
 }
 
-.btn-sm {
-  padding: 3px 8px;
-  font-size: 11px;
-  border-radius: 4px;
-}
-
-.btn-primary {
-  background-color: var(--primary);
-  color: #11111b;
-}
-
-.btn-primary:hover {
-  background-color: var(--primary-hover);
-}
-
-.btn-secondary {
-  background-color: var(--bg-card);
+.btn:hover {
+  background-color: var(--bg-surface);
   color: var(--text-main);
-  border-color: var(--border);
 }
 
-.btn-secondary:hover {
-  background-color: var(--bg-tab-active);
-  color: #fff;
+.btn:active {
+  transform: scale(0.97);
 }
 
-.btn-danger {
-  background-color: var(--danger);
-  color: #11111b;
+.btn-ghost {
+  color: var(--text-secondary);
 }
 
-.btn-danger:hover {
-  background-color: var(--danger-hover);
+.btn-icon, .btn-icon-sm {
+  padding: 0;
+  width: 28px;
 }
 
+.btn-segmented {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 0 2px;
+}
+
+.btn-seg {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.btn-seg + .btn-seg {
+  border-left: 1px solid var(--border);
+}
+
+.btn-tonal {
+  background-color: var(--bg-elevated);
+  border-color: var(--border-strong);
+  color: var(--text-main);
+  padding: 0 10px;
+}
+
+.btn-tonal:hover {
+  background-color: var(--bg-hover);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.mobile-only-btn {
+  display: none;
+}
+
+/* ==========================================================================
+   无框下划线标签栏
+   ========================================================================== */
 .tabs-bar {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   height: 34px;
   min-height: 34px;
-  background-color: var(--bg-surface);
+  background-color: var(--bg-chrome);
   border-bottom: 1px solid var(--border);
-  padding: 0 6px;
+  padding: 0 8px;
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
   user-select: none;
 }
 
 .tabs-bar::-webkit-scrollbar {
-  height: 2px;
-}
-
-.tabs-bar::-webkit-scrollbar-thumb {
-  background: var(--border);
+  display: none;
 }
 
 .tabs-list {
   display: flex;
-  gap: 3px;
-  height: 100%;
-  align-items: flex-end;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 100%;
 }
 
 .tab-item {
-  display: flex;
+  position: relative;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  height: 29px;
-  background-color: var(--bg-tab);
-  border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: 5px 5px 0 0;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  max-width: 240px;
+  background: transparent;
+  border: none;
   color: var(--text-muted);
   cursor: pointer;
   font-size: 12px;
+  line-height: 18px;
   font-family: var(--font-mono);
-  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+
+.tab-item > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tab-item:hover {
-  background-color: var(--bg-card);
-  color: var(--text-main);
+  color: var(--text-secondary);
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .tab-item.active {
-  background-color: var(--bg-dark);
-  color: var(--primary);
-  border-color: var(--primary);
-  border-bottom: 1px solid var(--bg-dark);
-  font-weight: 600;
+  color: var(--text-main);
+  background-color: var(--bg-terminal);
+  font-weight: 500;
+  box-shadow: inset 0 -2px 0 var(--text-main);
 }
 
 .tab-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  font-size: 11px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1;
   color: var(--text-muted);
-  transition: all 0.1s;
+  opacity: 0.7;
+  transition: background-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+}
+
+.tab-item.active .tab-close,
+.tab-item:hover .tab-close {
+  opacity: 1;
 }
 
 .tab-close:hover {
-  background-color: var(--danger);
-  color: #11111b;
+  background-color: rgba(248, 113, 113, 0.18);
+  color: var(--err);
 }
 
+/* ==========================================================================
+   终端主体区
+   ========================================================================== */
 .terminal-wrapper {
   flex: 1;
   min-height: 0;
   position: relative;
-  background-color: var(--bg-dark);
+  background-color: var(--bg-terminal);
   overflow: hidden;
   width: 100%;
 }
@@ -236,15 +308,13 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: auto;
-  /* 终端比窗口大时由这个容器滚动，所以显示它自己的滚动条，让人看得出还有内容在视野外 */
-  scrollbar-width: auto;
-  scrollbar-color: #585b70 var(--bg-dark);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
   padding: 0;
   margin: 0;
   touch-action: none;
 }
 
-/* 终端按 Tabby 的列数×行数撑开，比可视区大时由 .terminal-container 滚动；比可视区小时铺满 */
 .terminal-container .xterm {
   width: max-content;
   min-width: 100%;
@@ -256,38 +326,73 @@ html, body {
 
 .terminal-container .xterm-viewport {
   -webkit-overflow-scrolling: touch;
-  /* 终端尺寸跟随 Tabby，可能小于可视区，空白处要和主题底色一致 */
-  background-color: var(--bg-dark) !important;
+  background-color: var(--bg-terminal) !important;
+  scrollbar-width: none;
 }
 
+.terminal-container .xterm-viewport::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.terminal-container .xterm .scrollbar {
+  display: none !important;
+}
+
+/* ==========================================================================
+   底部状态栏
+   ========================================================================== */
 .status-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   height: 22px;
   min-height: 22px;
   padding: 0 10px;
-  background-color: var(--bg-surface);
+  background-color: var(--bg-chrome);
   border-top: 1px solid var(--border);
   font-size: 11px;
+  line-height: 14px;
   color: var(--text-muted);
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   user-select: none;
 }
 
-.status-left, .status-right {
+.status-target {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.status-pill {
+  flex-shrink: 0;
+}
+
+.status-dim {
+  color: var(--text-secondary);
 }
 
 .sep {
-  color: var(--border);
+  color: rgba(255, 255, 255, 0.14);
 }
 
+/* 全屏模式进一步压缩 chrome */
 .app-layout.is-fullscreen .top-nav {
-  height: 32px;
-  min-height: 32px;
+  height: 34px;
+  min-height: 34px;
 }
 
 .app-layout.is-fullscreen .tabs-bar {
@@ -295,49 +400,26 @@ html, body {
   min-height: 30px;
 }
 
-.btn-close {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 20px;
-  cursor: pointer;
-  line-height: 1;
-}
-
-.btn-close:hover {
-  color: #fff;
-}
-
 /* ==========================================================================
-   移动端与触控自适应样式 (Responsive & Mobile Enhancements)
+   移动端物理键帽虚拟按键栏
    ========================================================================== */
-
-/* 移动端菜单与辅助按键默认状态（桌面端默认隐藏） */
-.mobile-only-btn {
-  display: none;
-}
-
 .accessory-bar {
   display: none;
   flex-shrink: 0;
-  height: 38px;
-  background: var(--bg-surface);
+  height: 40px;
+  background-color: #0d0d10;
   border-bottom: 1px solid var(--border);
   z-index: 50;
   align-items: center;
-  padding: 0 6px;
   user-select: none;
-  transition: opacity 0.2s ease;
 }
 
-/* 手机端、平板 Pad 端 (≤ 1024px) 或任何触控设备默认直接展示虚拟按键栏 */
 @media (max-width: 1024px), (hover: none) and (pointer: coarse) {
   .accessory-bar {
     display: flex;
   }
 }
 
-/* 用户手动强制显示 / 隐藏 */
 .app-layout.show-accessory .accessory-bar {
   display: flex !important;
 }
@@ -348,12 +430,17 @@ html, body {
 
 .accessory-scroller {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 5px;
   overflow-x: auto;
   white-space: nowrap;
   flex: 1;
-  padding: 4px 6px;
+  min-width: 0;
+  padding: 0 12px 0 8px;
+  scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent 100%);
 }
 
 .accessory-scroller::-webkit-scrollbar {
@@ -368,49 +455,60 @@ html, body {
   justify-content: center;
   height: 28px;
   min-width: 34px;
-  padding: 0 8px;
-  background-color: var(--bg-tab);
+  padding: 0 9px;
+  background-color: #1c1c21;
   color: var(--text-main);
-  border: 1px solid var(--border);
-  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 6px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 600;
+  line-height: 16px;
+  font-weight: 500;
   cursor: pointer;
   touch-action: manipulation;
-  transition: background-color 0.1s, transform 0.05s, border-color 0.1s, box-shadow 0.1s;
+  transition: background-color 0.08s ease, transform 0.06s ease, border-color 0.1s ease;
 }
 
 .acc-btn-keyboard {
-  background-color: rgba(137, 180, 250, 0.18);
-  border-color: rgba(137, 180, 250, 0.4);
+  color: var(--text-secondary);
+  padding: 0 8px;
+}
+
+.acc-btn-arrow {
+  min-width: 32px;
   font-size: 13px;
-  padding: 0 7px;
 }
 
 .acc-btn-enter {
-  background-color: var(--primary);
-  color: #11111b;
-  font-weight: 700;
-  border-color: var(--primary-hover);
-}
-
-.acc-btn-enter:hover {
-  background-color: var(--primary-hover);
+  background-color: #27272f;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  font-weight: 600;
+  padding: 0 11px;
 }
 
 .acc-btn:active, .acc-btn.active {
-  background-color: var(--primary);
-  color: #11111b;
-  border-color: var(--primary-hover);
-  transform: scale(0.96);
+  background-color: #2f2f38;
+  transform: translateY(1px);
+  box-shadow: none;
 }
 
 .acc-btn.sticky-active {
-  background-color: var(--primary);
-  color: #11111b;
-  border-color: var(--primary-hover);
-  box-shadow: 0 0 8px rgba(137, 180, 250, 0.5);
+  background-color: var(--text-main);
+  color: #09090b;
+  border-color: var(--text-main);
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.acc-toggle-wrap {
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 4px;
+  border-left: 1px solid var(--border);
+  flex-shrink: 0;
+  background-color: #0d0d10;
 }
 
 .acc-toggle-btn {
@@ -418,65 +516,69 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  height: 28px;
-  padding: 0 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  height: 26px;
+  padding: 0 7px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   flex-shrink: 0;
   touch-action: manipulation;
-  transition: all 0.15s ease;
 }
 
 .acc-toggle-btn:hover {
-  background-color: var(--bg-tab);
   color: var(--text-main);
-  border-color: var(--primary);
+  background-color: var(--bg-surface);
 }
 
 .accessory-bar.collapsed {
-  height: 20px;
-  min-height: 20px;
-  background: rgba(24, 24, 37, 0.85);
-  padding: 0;
+  height: 22px;
+  min-height: 22px;
+  background-color: var(--bg-chrome);
   justify-content: center;
   cursor: pointer;
-  border-bottom: 1px solid var(--border);
 }
 
 .accessory-bar.collapsed .accessory-scroller {
   display: none;
 }
 
-.accessory-bar.collapsed .acc-toggle-btn {
+.accessory-bar.collapsed .acc-toggle-wrap {
   width: 100%;
-  height: 20px;
-  font-size: 11px;
-  border: none;
+  border-left: none;
   background: transparent;
-  gap: 4px;
+  justify-content: center;
+  padding: 0;
 }
 
-/* 侧滑/折叠抽屉菜单 */
+.accessory-bar.collapsed .acc-toggle-btn {
+  width: 100%;
+  height: 22px;
+  font-size: 10px;
+  color: var(--text-muted);
+  border-radius: 0;
+}
+
+/* ==========================================================================
+   抽屉 / 手机端 Bottom Sheet
+   ========================================================================== */
 .mobile-drawer {
   position: fixed;
   top: 0;
   right: 0;
-  width: 280px;
+  width: 288px;
   max-width: 85vw;
   height: 100dvh;
-  background-color: var(--bg-surface);
-  border-left: 1px solid var(--border);
+  background-color: var(--bg-chrome);
+  border-left: 1px solid var(--border-strong);
   z-index: 1001;
   display: flex;
   flex-direction: column;
   transform: translateX(0);
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.6);
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .mobile-drawer.hidden {
@@ -484,17 +586,17 @@ html, body {
   pointer-events: none;
 }
 
+.sheet-handle {
+  display: none;
+}
+
 .drawer-backdrop {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   z-index: 1000;
-  transition: opacity 0.2s ease;
 }
 
 .drawer-backdrop.hidden {
@@ -505,19 +607,37 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background-color: var(--bg-card);
 }
 
 .mobile-drawer-title {
   font-weight: 600;
-  font-size: 14px;
-  color: var(--primary);
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.btn-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.btn-close:hover {
+  color: var(--text-main);
 }
 
 .mobile-drawer-body {
-  padding: 16px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -532,9 +652,7 @@ html, body {
 
 .drawer-section-title {
   font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-weight: 500;
   color: var(--text-muted);
 }
 
@@ -547,117 +665,549 @@ html, body {
 .drawer-btn-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
-.drawer-btn-list .btn, .drawer-btn-grid .btn {
-  justify-content: center;
-  padding: 9px 12px;
+.btn-sheet {
+  height: 40px;
+  padding: 0 12px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-main);
   font-size: 13px;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.drawer-btn-grid .btn-sheet {
+  justify-content: center;
+}
+
+.btn-sheet:hover {
+  background-color: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+.sheet-key {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 /* ==========================================================================
-   响应式断点 (Mobile & Pad Breakpoints)
+   手机端响应式与 Bottom Sheet
    ========================================================================== */
-
 @media (max-width: 768px) {
-  /* 顶栏收纳 */
   .top-nav {
-    padding: 0 8px;
-    height: 42px;
-    min-height: 42px;
+    padding: 0 8px 0 10px;
+    height: 40px;
+    min-height: 40px;
   }
 
-  /* 手机顶栏空间有限：隐藏标题文字，按键栏开关在抽屉菜单里 */
   .brand-title {
     display: none;
   }
 
-  /* 隐藏桌面专属按钮，展示汉堡菜单 */
-  #btn-toggle-keys,
-  #btn-fullscreen,
-  #btn-font-dec,
-  #btn-font-inc,
-  #btn-refresh {
+  .desktop-only-group {
     display: none !important;
   }
 
   .mobile-only-btn {
     display: inline-flex;
-    padding: 6px 10px;
-    font-size: 15px;
+    width: 32px;
+    height: 30px;
   }
 
-  /* 优化 Tab 触控面积 */
+  #btn-new-window {
+    height: 28px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
   .tabs-bar {
-    height: 38px;
-    min-height: 38px;
+    height: 36px;
+    min-height: 36px;
     padding: 0 4px;
-    -webkit-overflow-scrolling: touch;
   }
 
   .tab-item {
-    height: 33px;
-    padding: 4px 14px;
-    font-size: 12px;
-    touch-action: manipulation;
+    padding: 0 8px 0 12px;
+    max-width: 200px;
   }
 
   .tab-close {
-    width: 20px;
-    height: 20px;
-    font-size: 14px;
+    width: 22px;
+    height: 22px;
+    font-size: 15px;
+    opacity: 0.85;
   }
 
-  /* 状态栏紧凑排版与 iPhone 底部安全区适配 */
   .status-bar {
     height: calc(22px + env(safe-area-inset-bottom, 0px));
+    min-height: calc(22px + env(safe-area-inset-bottom, 0px));
+    padding: 0 10px env(safe-area-inset-bottom, 0px);
+    font-size: 10px;
+    gap: 8px;
+  }
+
+  /* 手机端弹出菜单采用原生 Bottom Sheet */
+  .mobile-drawer {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: 75dvh;
+    border-left: none;
+    border-top: 1px solid var(--border-strong);
+    border-radius: 16px 16px 0 0;
+    transform: translateY(0);
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    font-size: 10px;
-    padding-left: 8px;
-    padding-right: 8px;
-    overflow: hidden;
   }
 
-  .status-left, .status-right {
-    gap: 6px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .mobile-drawer.hidden {
+    transform: translateY(100%);
   }
 
-  .status-left span, .status-right span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .sheet-handle {
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background-color: rgba(255, 255, 255, 0.18);
+    margin: 8px auto 0;
   }
 
-}
-
-@media (max-width: 480px) {
-  /* 超窄屏手机下隐藏冗长的工作目录与次要命令字段，保障核心窗口目标与终端视口尺寸清晰可见 */
-  .status-right {
-    display: none;
-  }
-
-  #status-command,
-  .status-left .sep:nth-of-type(1) {
-    display: none;
-  }
-
-  .brand-icon {
-    font-size: 14px;
-  }
-
-  #connection-badge {
-    padding: 2px 5px;
-    font-size: 10px;
+  .mobile-drawer-header {
+    padding: 10px 16px 12px;
   }
 }
 
+@media (max-width: 420px) {
+  .status-meta .sep,
+  #status-window {
+    display: none;
+  }
+}
 
 /* ==========================================================================
-   空状态 (没有 Bridge / 没有终端标签页时的提示)
+   新建终端面板
+   ========================================================================== */
+.new-term-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.new-term-panel.hidden {
+  display: none;
+}
+
+.new-term-card {
+  width: 100%;
+  max-width: 460px;
+  max-height: 82dvh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-chrome);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.new-term-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.new-term-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.new-term-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.new-term-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.new-term-section.hidden {
+  display: none;
+}
+
+.new-term-section-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.env-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.env-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 42px;
+  flex-shrink: 0;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-main);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.env-option:hover {
+  background-color: var(--bg-elevated);
+}
+
+.env-option.is-selected {
+  border-color: rgba(255, 255, 255, 0.32);
+  background-color: var(--bg-elevated);
+}
+
+.env-radio {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-muted);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.env-option.is-selected .env-radio {
+  border-color: var(--text-main);
+}
+
+.env-option.is-selected .env-radio::after {
+  content: '';
+  position: absolute;
+  inset: 2.5px;
+  border-radius: 50%;
+  background-color: var(--text-main);
+}
+
+.env-name {
+  font-weight: 500;
+}
+
+.env-hint {
+  margin-left: auto;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+.cwd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 等宽小字在部分手机浏览器里按 normal 行高算，行盒会小于字体的上伸部，
+   配合 overflow:hidden 就会把字切掉上半截。这里给出行高并让文字垂直居中。 */
+.cwd-value {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-sheet-sm {
+  height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cwd-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  background-color: var(--bg-terminal);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.cwd-input::placeholder {
+  color: var(--text-muted);
+}
+
+.cwd-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* 最近使用的目录：横向排列的胶囊，显示末级目录名，悬停给出完整路径 */
+.recent-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.recent-wrap.hidden {
+  display: none;
+}
+
+.recent-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.recent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.recent-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.recent-item:hover {
+  background-color: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+.recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.recent-full {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 190px;
+}
+
+.browse-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.browse-back {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.browse-back:hover {
+  color: var(--text-main);
+}
+
+.browse-crumb {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.browse-error {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background-color: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  color: var(--err);
+  font-size: 12px;
+}
+
+.browse-error.hidden {
+  display: none;
+}
+
+/* 目录列表吃掉面板的剩余空间；面板本身滚动，所以按钮始终够得着 */
+.browse-list {
+  flex: 1 1 auto;
+  min-height: 96px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--bg-terminal);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* 列表在空间不足时会被压缩，条目必须保持自身高度，否则文字被切掉上半截 */
+.browse-list > * {
+  flex-shrink: 0;
+}
+
+.browse-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  text-align: left;
+  padding: 0 10px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browse-item:hover {
+  background-color: var(--bg-surface);
+}
+
+.browse-up {
+  color: var(--text-muted);
+}
+
+.browse-empty {
+  padding: 14px 10px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.new-term-browser-actions {
+  padding: 0 16px 12px;
+  flex-shrink: 0;
+}
+
+.new-term-browser-actions.hidden {
+  display: none;
+}
+
+.btn-browse-use {
+  height: 34px;
+  width: 100%;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.btn-browse-use:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.new-term-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background-color: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+.new-term-footer .btn {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.new-term-footer .btn-sheet {
+  justify-content: center;
+}
+
+/* ==========================================================================
+   空状态
    ========================================================================== */
 .empty-state {
   position: absolute;
@@ -668,27 +1218,12 @@ html, body {
   padding: 24px;
   text-align: center;
   line-height: 1.6;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-muted);
-  background-color: var(--bg-dark);
+  background-color: var(--bg-terminal);
   z-index: 5;
 }
 
 .empty-state.hidden {
   display: none;
-}
-
-/* 只隐藏 xterm 自带的滚动条(它按整个终端高度绘制，终端比窗口高时位置和比例都不对)；容器自己的滚动条保留 */
-.terminal-container .xterm-viewport::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
-}
-
-.terminal-container .xterm-viewport {
-  scrollbar-width: none;
-}
-
-.terminal-container .xterm .scrollbar {
-  display: none !important;
 }
