@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import Module, { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -365,9 +368,11 @@ test('garbage from the server is ignored', () => {
 test('index.js wires the Bridge into Tabby\'s DI as a terminal decorator and a config provider', () => {
   const injected = [];
   const metadata = [];
+  class CLIHandler {}
   class ConfigProvider {}
   class TerminalDecorator {}
   class ConfigService {}
+  class HostWindowService {}
   class ProfilesService {}
   const fakes = {
     '@angular/core': {
@@ -375,7 +380,7 @@ test('index.js wires the Bridge into Tabby\'s DI as a terminal decorator and a c
       Injectable: () => () => {},
       Inject: (token) => (cls, _key, index) => { injected.push({ cls: cls.name, index, token }); }
     },
-    'tabby-core': { ConfigProvider, ConfigService, ProfilesService },
+    'tabby-core': { CLIHandler, ConfigProvider, ConfigService, HostWindowService, ProfilesService },
     'tabby-terminal': { TerminalDecorator }
   };
   const originalLoad = Module._load;
@@ -393,11 +398,20 @@ test('index.js wires the Bridge into Tabby\'s DI as a terminal decorator and a c
   assert.equal(typeof loaded.default, 'function');
   assert.equal(metadata.length, 1);
   const providers = metadata[0].meta.providers;
-  assert.deepEqual(providers.map((p) => [p.provide, p.multi]), [[ConfigProvider, true], [TerminalDecorator, true]]);
+  assert.deepEqual(providers.map((p) => [p.provide, p.multi, p.useClass.name]), [
+    [ConfigProvider, true, 'WebBridgeConfigProvider'],
+    [TerminalDecorator, true, 'WebBridgeDecorator'],
+    [CLIHandler, true, 'WslHereCLIHandler']
+  ]);
   assert.deepEqual(injected.map((i) => [i.cls, i.index, i.token]), [
     ['WebBridgeDecorator', 0, ConfigService],
-    ['WebBridgeDecorator', 1, ProfilesService]
+    ['WebBridgeDecorator', 1, ProfilesService],
+    ['WslHereCLIHandler', 0, ProfilesService],
+    ['WslHereCLIHandler', 1, HostWindowService]
   ]);
+  const handler = new providers[2].useClass();
+  assert.equal(handler.priority, 100, 'runs before Tabby\'s own CLI handlers');
+  assert.equal(handler.firstMatchOnly, true);
   assert.equal(new providers[0].useClass().defaults.wslWebBridge.serverUrl, 'ws://localhost:7890');
   assert.equal(loaded.detectOrigin(), process.platform === 'win32' ? 'Windows' : 'WSL');
 });
@@ -627,4 +641,93 @@ test('MIRROR-B07 snapshot clips alternate-screen rows to current cols so shrunk 
   assert.equal(rows[1], '  中文宽度测试' + 'x'.repeat(35)); // 2 spaces + 6*2 CJK + 35 x = 49 cols
   assert.match(rows[2], /\x1b\[19A\x1b\[44D\x1b\[0m\x1b\[\?2004h$/, 'trailing cursor move and modes are preserved');
   core.stop();
+});
+
+const {
+  decodeLauncher,
+  handleWslHere,
+  launcherPathFromArgv,
+  parseLauncher
+} = require('../bridge/src/wsl-here.js');
+
+const WSL_LAUNCHER = `wsl-${'a'.repeat(32)}.cmd`;
+
+function wslLauncherArgv(file, { alreadyRunning = true } = {}) {
+  // Tabby is already running: Electron moves the /c switch to the front, so this is no longer a run command.
+  if (alreadyRunning) return { _: ['/c', 'run', 'C:\\Windows\\System32\\cmd.exe', file] };
+  return { _: ['run'], command: ['C:\\Windows\\System32\\cmd.exe', '/c', file] };
+}
+
+test('the WSL launcher is still recognisable after Tabby reorders a second start', () => {
+  const file = `C:\\Users\\Administrator\\AppData\\Local\\Tabby\\launchers\\${WSL_LAUNCHER}`;
+  assert.equal(launcherPathFromArgv(wslLauncherArgv(file)), file);
+  assert.equal(launcherPathFromArgv(wslLauncherArgv(`"${file}"`)), file);
+  assert.equal(launcherPathFromArgv(wslLauncherArgv(file, { alreadyRunning: false })), file);
+  assert.equal(launcherPathFromArgv({ _: ['open'], directory: '\\\\wsl$\\Ubuntu\\home\\joslyn' }), null);
+  assert.equal(launcherPathFromArgv({ _: ['run'], command: ['C:\\Windows\\System32\\wsl.exe', '--cd', '/home'] }), null);
+});
+
+test('only the one line the Shift+right-click script writes counts as a WSL launcher', () => {
+  assert.deepEqual(
+    parseLauncher('@C:\\Windows\\System32\\wsl.exe --distribution Ubuntu --cd "/home/joslyn/code/third"\r\n'),
+    { distro: 'Ubuntu', cwd: '/home/joslyn/code/third' }
+  );
+  assert.deepEqual(
+    parseLauncher('@"C:\\Windows\\System32\\wsl.exe" --distribution Ubuntu --cd "~"'),
+    { distro: 'Ubuntu', cwd: '~' }
+  );
+  assert.equal(parseLauncher('@C:\\Windows\\System32\\wsl.exe --distribution Ubuntu & calc.exe'), null);
+  assert.equal(parseLauncher(''), null);
+});
+
+test('a launcher saved in the ANSI code page still names a Chinese directory', () => {
+  const bytes = Buffer.concat([
+    Buffer.from('@C:\\Windows\\System32\\wsl.exe --distribution Ubuntu --cd "'),
+    Buffer.from([0x2f, 0xb4, 0xf3, 0xc4, 0xa3, 0xd0, 0xcd]),
+    Buffer.from('"\r\n')
+  ]);
+  assert.deepEqual(parseLauncher(decodeLauncher(bytes)), { distro: 'Ubuntu', cwd: '/\u5927\u6a21\u578b' });
+});
+
+test('Shift+right-click while Tabby is open opens a wsl.exe pane instead of running the batch file', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'wsl-here-'));
+  try {
+    const dir = path.join(root, 'Tabby', 'launchers');
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, WSL_LAUNCHER);
+    writeFileSync(file, '@C:\\Windows\\System32\\wsl.exe --distribution Ubuntu --cd "/home/joslyn/code/third"\r\n');
+    const opened = [];
+    let broughtToFront = 0;
+    const handled = await handleWslHere(wslLauncherArgv(file), {
+      profiles: { openNewTabForProfile: async (profile) => { opened.push(profile); } },
+      hostWindow: { bringToFront() { broughtToFront += 1; } },
+      command: 'C:\\Windows\\System32\\wsl.exe'
+    });
+    assert.equal(handled, true);
+    assert.equal(broughtToFront, 1);
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].type, 'local');
+    assert.equal(opened[0].options.command, 'C:\\Windows\\System32\\wsl.exe');
+    assert.deepEqual(opened[0].options.args, ['--distribution', 'Ubuntu', '--cd', '/home/joslyn/code/third']);
+    assert.equal(opened[0].options.cwd, null, 'a Windows cwd would override --cd');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a missing launcher, or one that is not the script\'s line, is left to Tabby', async () => {
+  const missing = path.join(os.tmpdir(), 'Tabby', 'launchers', `wsl-${'b'.repeat(32)}.cmd`);
+  const refuse = { openNewTabForProfile: async () => { throw new Error('should not open'); } };
+  assert.equal(await handleWslHere(wslLauncherArgv(missing), { profiles: refuse, command: 'wsl.exe' }), false);
+
+  const root = mkdtempSync(path.join(os.tmpdir(), 'wsl-here-'));
+  try {
+    const dir = path.join(root, 'Tabby', 'launchers');
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, WSL_LAUNCHER);
+    writeFileSync(file, '@cmd.exe /c echo hi\r\n');
+    assert.equal(await handleWslHere(wslLauncherArgv(file), { profiles: refuse, command: 'wsl.exe' }), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

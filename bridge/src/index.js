@@ -2,11 +2,12 @@
 
 // Tabby plugin entry. Tabby supplies these modules at runtime; they are not bundled.
 const { NgModule, Injectable, Inject } = require('@angular/core');
-const { ConfigProvider, ConfigService, ProfilesService } = require('tabby-core');
+const { CLIHandler, ConfigProvider, ConfigService, HostWindowService, ProfilesService } = require('tabby-core');
 const { TerminalDecorator } = require('tabby-terminal');
 const { BridgeCore } = require('./bridge-core');
 const { listDirectory, directoryExists } = require('./directories');
 const { WSL_DISTRO, shellCwd, wslPathToLinux } = require('./paths');
+const { handleWslHere, wslProfile } = require('./wsl-here');
 
 const DEFAULT_SERVER_URL = 'ws://localhost:7890';
 
@@ -91,21 +92,11 @@ function getCore(config, profiles) {
       // profile 不设 cwd，避免 Tabby 的 local provider 用上一个标签的目录覆盖它；
       // 真正决定 shell 工作目录的是 --cd。
       const linuxCwd = cwd ? wslPathToLinux(cwd) : '~';
-      const profile = {
-        id: 'local:wsl-web-bridge-wsl',
-        type: 'local',
-        name: 'WSL',
-        options: {
-          command: wslExecutable(),
-          args: ['--distribution', WSL_DISTRO, '--cd', linuxCwd],
-          homeDirArgs: [],
-          cwd: null,
-          env: {},
-          shellType: null,
-          fsBase: null
-        }
-      };
-      await profiles.openNewTabForProfile(profile);
+      await profiles.openNewTabForProfile(wslProfile({
+        command: wslExecutable(),
+        distro: WSL_DISTRO,
+        cwd: linuxCwd
+      }));
     },
     listDirectories: (dirPath) => listDirectory(dirPath),
     directoryExists: (dirPath) => directoryExists(dirPath),
@@ -136,11 +127,35 @@ Injectable()(WebBridgeDecorator);
 Inject(ConfigService)(WebBridgeDecorator, undefined, 0);
 Inject(ProfilesService)(WebBridgeDecorator, undefined, 1);
 
+// 优先级高于 Tabby 自带的处理器（0、-100、-999）。已打开的 Tabby 收到第二次启动时，
+// Electron 会把 /c 挪到参数最前；若等自带处理器去处理，它会把 /c 当成目录并且中断。
+class WslHereCLIHandler extends CLIHandler {
+  constructor(profiles, hostWindow) {
+    super();
+    this.profiles = profiles;
+    this.hostWindow = hostWindow;
+    this.firstMatchOnly = true;
+    this.priority = 100;
+  }
+
+  handle(event) {
+    return handleWslHere(event && event.argv, {
+      profiles: this.profiles,
+      hostWindow: this.hostWindow,
+      command: wslExecutable()
+    });
+  }
+}
+Injectable()(WslHereCLIHandler);
+Inject(ProfilesService)(WslHereCLIHandler, undefined, 0);
+Inject(HostWindowService)(WslHereCLIHandler, undefined, 1);
+
 class WebBridgeModule {}
 NgModule({
   providers: [
     { provide: ConfigProvider, useClass: WebBridgeConfigProvider, multi: true },
-    { provide: TerminalDecorator, useClass: WebBridgeDecorator, multi: true }
+    { provide: TerminalDecorator, useClass: WebBridgeDecorator, multi: true },
+    { provide: CLIHandler, useClass: WslHereCLIHandler, multi: true }
   ]
 })(WebBridgeModule);
 
@@ -151,3 +166,4 @@ module.exports.detectEnvironment = detectEnvironment;
 module.exports.defaultWindowsProfile = defaultWindowsProfile;
 module.exports.wslExecutable = wslExecutable;
 module.exports.shellCwd = shellCwd;
+module.exports.WslHereCLIHandler = WslHereCLIHandler;
